@@ -7,9 +7,9 @@ GITCOMMIT=`git rev-parse --short HEAD`
 BUILDTIME=`date +%FT%T%z`
 HOSTNAME=`hostname`
 
-all: hdfs-mount 
+all: hdfs-mount
 
-hdfs-mount: *.go $(GOPATH)/src/bazil.org/fuse $(GOPATH)/src/github.com/colinmarc/hdfs $(GOPATH)/src/golang.org/x/net/context $(GOPATH)/src/github.com/golang/protobuf/proto
+hdfs-mount: *.go $(GOPATH)/src/bazil.org/fuse $(GOPATH)/src/github.com/colinmarc/hdfs $(GOPATH)/src/golang.org/x/net/context $(GOPATH)/src/github.com/jcmturner/gokrb5/ $(GOPATH)/src/github.com/jcmturner/goidentity $(GOPATH)/src/github.com/jcmturner/aescts $(GOPATH)/src/github.com/jcmturner/dnsutils $(GOPATH)/src/github.com/jcmturner/gofork/ $(GOPATH)/src/golang.org/x/crypto/md4 $(GOPATH)/src/golang.org/x/crypto/pbkdf2 $(GOPATH)/src/github.com/jcmturner/rpc/v2/ndr $(GOPATH)/src/github.com/jcmturner/rpc/v2/mstypes $(GOPATH)/src/github.com/golang/protobuf/proto
 	go build -ldflags="-w -X main.GITCOMMIT=${GITCOMMIT} -X main.BUILDTIME=${BUILDTIME} -X main.HOSTNAME=${HOSTNAME}" -o hdfs-mount
 
 $(GOPATH)/src/bazil.org/fuse: $(GOPATH)/src/github.com/bazil/fuse

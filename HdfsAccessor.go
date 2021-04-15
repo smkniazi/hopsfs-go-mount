@@ -96,6 +96,7 @@ func (this *hdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 	// Colinmar's hdfs implementation has supported the multiple name node connection
 	client, err := hdfs.NewClient(hdfs.ClientOptions{
 		Addresses: this.NameNodeAddresses,
+		User: os.Getenv("HADOOP_USER_NAME"),
 		})
 	if err != nil {
 		return nil, err

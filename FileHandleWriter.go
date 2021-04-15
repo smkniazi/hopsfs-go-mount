@@ -26,6 +26,7 @@ func NewFileHandleWriter(handle *FileHandle, newFile bool) (*FileHandleWriter, e
 	path := this.Handle.File.AbsolutePath()
 
 	hdfsAccessor := this.Handle.File.FileSystem.HdfsAccessor
+	Info.Println("Attr is ", this.Handle.File.Attrs)
 	if newFile {
 		hdfsAccessor.Remove(path)
 		w, err := hdfsAccessor.CreateFile(path, this.Handle.File.Attrs.Mode)
@@ -35,13 +36,13 @@ func NewFileHandleWriter(handle *FileHandle, newFile bool) (*FileHandleWriter, e
 		}
 		w.Close()
 	}
-	stageDir := "/var/hdfs-mount" // TODO: make configurable
-	if ok := os.MkdirAll(stageDir, 0700); ok != nil {
-		Error.Println("Failed to create stageDir /var/hdfs-mount, Error:", ok)
+
+	if ok := os.MkdirAll(stagingDir, 0700); ok != nil {
+		Error.Println("Failed to create stageDir", stagingDir, ", Error:", ok)
 		return nil, ok
 	}
 	var err error
-	this.stagingFile, err = ioutil.TempFile(stageDir, "stage")
+	this.stagingFile, err = ioutil.TempFile(stagingDir, "stage")
 	if err != nil {
 		return nil, err
 	}

@@ -4,7 +4,8 @@ package main
 
 import (
 	"errors"
-	"github.com/colinmarc/hdfs"
+
+	"github.com/colinmarc/hdfs/v2"
 )
 
 // Allows to open HDFS file as a seekable/flushable/truncatable write-only stream

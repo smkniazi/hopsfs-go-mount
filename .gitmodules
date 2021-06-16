@@ -1,4 +1,0 @@
-[submodule "submodules/colinmarc-hdfs"]
-	path = submodules/colinmarc-hdfs
-	url = https://github.com/gibchikafa/colinmarc-hdfs.git
-        branch = master

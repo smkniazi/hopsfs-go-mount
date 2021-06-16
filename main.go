@@ -3,8 +3,6 @@
 package main
 
 import (
-	"bazil.org/fuse/fs"
-	_ "bazil.org/fuse/fs/fstestutil"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -14,6 +12,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"bazil.org/fuse/fs"
+	_ "bazil.org/fuse/fs/fstestutil"
 )
 
 var Usage = func() {
@@ -40,10 +41,12 @@ func main() {
 	readOnly := flag.Bool("readOnly", false, "Enables mount with readonly")
 	logLevel := flag.Int("logLevel", 0, "logs to be printed. 0: only fatal/err logs; 1: +warning logs; 2: +info logs")
 	flag.StringVar(&stagingDir, "stageDir", "/var/hdfs-mount", "stage directory for writing file")
+	tls := flag.Bool("tls", false, "Enables tls connections")
+
 	flag.Usage = Usage
 	flag.Parse()
 
-	log.Print("Staging dir is ", stagingDir)
+	log.Printf("Staging dir is:%s, Using TLS: %v  \n", stagingDir, *tls)
 
 	if flag.NArg() != 2 {
 		Usage()
@@ -64,7 +67,7 @@ func main() {
 		InitLogger(os.Stdout, os.Stdout, os.Stdout, os.Stderr)
 	}
 
-	hdfsAccessor, err := NewHdfsAccessor(flag.Arg(0), WallClock{})
+	hdfsAccessor, err := NewHdfsAccessor(flag.Arg(0), WallClock{}, *tls)
 	if err != nil {
 		log.Fatal("Error/NewHdfsAccessor: ", err)
 	}

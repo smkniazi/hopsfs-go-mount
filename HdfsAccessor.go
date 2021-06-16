@@ -3,11 +3,8 @@
 package main
 
 import (
-	"bazil.org/fuse"
 	"errors"
 	"fmt"
-	"github.com/colinmarc/hdfs"
-	"github.com/colinmarc/hdfs/protocol/hadoop_hdfs"
 	"io"
 	"os"
 	"os/user"
@@ -15,6 +12,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"bazil.org/fuse"
+	"github.com/colinmarc/hdfs/v2"
 )
 
 // Interface for accessing HDFS
@@ -40,6 +40,7 @@ type hdfsAccessorImpl struct {
 	MetadataClient      *hdfs.Client             // HDFS client used for metadata operations
 	MetadataClientMutex sync.Mutex               // Serializing all metadata operations for simplicity (for now), TODO: allow N concurrent operations
 	UserNameToUidCache  map[string]UidCacheEntry // cache for converting usernames to UIDs
+	tls                 bool                     // enable/disable using tls
 }
 
 type UidCacheEntry struct {
@@ -50,13 +51,15 @@ type UidCacheEntry struct {
 var _ HdfsAccessor = (*hdfsAccessorImpl)(nil) // ensure hdfsAccessorImpl implements HdfsAccessor
 
 // Creates an instance of HdfsAccessor
-func NewHdfsAccessor(nameNodeAddresses string, clock Clock) (HdfsAccessor, error) {
+func NewHdfsAccessor(nameNodeAddresses string, clock Clock, tls bool) (HdfsAccessor, error) {
 	nns := strings.Split(nameNodeAddresses, ",")
 
 	this := &hdfsAccessorImpl{
 		NameNodeAddresses:  nns,
 		Clock:              clock,
-		UserNameToUidCache: make(map[string]UidCacheEntry)}
+		UserNameToUidCache: make(map[string]UidCacheEntry),
+		tls:                tls,
+	}
 	return this, nil
 }
 
@@ -96,8 +99,9 @@ func (this *hdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 	// Colinmar's hdfs implementation has supported the multiple name node connection
 	client, err := hdfs.NewClient(hdfs.ClientOptions{
 		Addresses: this.NameNodeAddresses,
-		User: os.Getenv("HADOOP_USER_NAME"),
-		})
+		NoTLS:     true,
+		User:      os.Getenv("HADOOP_USER_NAME"),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -227,18 +231,20 @@ func (this *hdfsAccessorImpl) StatFs() (FsInfo, error) {
 
 // Converts os.FileInfo + underlying proto-buf data into Attrs structure
 func (this *hdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
-	protoBufData := fileInfo.Sys().(*hadoop_hdfs.HdfsFileStatusProto)
-	mode := os.FileMode(*protoBufData.Permission.Perm)
+	// protoBufDatr := fileInfo.Sys().(*hadoop_hdfs.HdfsFileStatusProto)
+	fi := fileInfo.(*hdfs.FileInfo)
+	mode := os.FileMode(fi.Permission())
 	if fileInfo.IsDir() {
 		mode |= os.ModeDir
 	}
-	modificationTime := time.Unix(int64(protoBufData.GetModificationTime())/1000, 0)
+
+	modificationTime := time.Unix(int64(fi.ModificationTime())/1000, 0)
 	return Attrs{
-		Inode:  *protoBufData.FileId,
+		Inode:  fi.FileId(),
 		Name:   fileInfo.Name(),
 		Mode:   mode,
-		Size:   *protoBufData.Length,
-		Uid:    this.LookupUid(*protoBufData.Owner),
+		Size:   fi.Length(),
+		Uid:    this.LookupUid(fi.Owner()),
 		Mtime:  modificationTime,
 		Ctime:  modificationTime,
 		Crtime: modificationTime,
@@ -246,7 +252,7 @@ func (this *hdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 }
 
 func (this *hdfsAccessorImpl) AttrsFromFsInfo(fsInfo hdfs.FsInfo) FsInfo {
-	return FsInfo {
+	return FsInfo{
 		capacity:  fsInfo.Capacity,
 		used:      fsInfo.Used,
 		remaining: fsInfo.Remaining}
@@ -359,12 +365,12 @@ func (this *hdfsAccessorImpl) Chown(path string, user, group string) error {
 	return this.MetadataClient.Chown(path, user, group)
 }
 
-// Close current connection if needed 
+// Close current connection if needed
 func (this *hdfsAccessorImpl) Close() error {
 	this.MetadataClientMutex.Lock()
 	defer this.MetadataClientMutex.Unlock()
 
-	if(this.MetadataClient != nil) {
+	if this.MetadataClient != nil {
 		err := this.MetadataClient.Close()
 		this.MetadataClient = nil
 		return err

@@ -3,10 +3,11 @@
 package main
 
 import (
+	"sync"
+
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"golang.org/x/net/context"
-	"sync"
 )
 
 // Represends a handle to an open file
@@ -23,6 +24,7 @@ var _ fs.HandleReader = (*FileHandle)(nil)
 var _ fs.HandleReleaser = (*FileHandle)(nil)
 var _ fs.HandleWriter = (*FileHandle)(nil)
 var _ fs.NodeFsyncer = (*FileHandle)(nil)
+var _ fs.HandleFlusher = (*FileHandle)(nil)
 
 // Creates new file handle
 func NewFileHandle(file *File) *FileHandle {

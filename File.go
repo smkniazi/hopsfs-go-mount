@@ -3,14 +3,15 @@
 package main
 
 import (
-	"bazil.org/fuse"
-	"bazil.org/fuse/fs"
 	"fmt"
-	"golang.org/x/net/context"
 	"os/user"
 	"path"
 	"sync"
 	"time"
+
+	"bazil.org/fuse"
+	"bazil.org/fuse/fs"
+	"golang.org/x/net/context"
 )
 
 type File struct {
@@ -26,6 +27,7 @@ type File struct {
 var _ fs.Node = (*File)(nil)
 var _ fs.NodeOpener = (*File)(nil)
 var _ fs.NodeFsyncer = (*File)(nil)
+var _ fs.NodeSetattrer = (*File)(nil)
 
 // File is also a factory for ReadSeekCloser objects
 var _ ReadSeekCloserFactory = (*File)(nil)

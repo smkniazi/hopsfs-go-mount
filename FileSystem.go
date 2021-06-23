@@ -48,12 +48,12 @@ func NewFileSystem(hdfsAccessor HdfsAccessor, mountPoint string, allowedPrefixes
 }
 
 // Mounts the filesystem
-func (this *FileSystem) Mount() (*fuse.Conn, error) {
+func (filesystem *FileSystem) Mount() (*fuse.Conn, error) {
 	var conn *fuse.Conn
 	var err error
-	if this.ReadOnly {
+	if filesystem.ReadOnly {
 		conn, err = fuse.Mount(
-			this.MountPoint,
+			filesystem.MountPoint,
 			fuse.FSName("hdfs"),
 			fuse.Subtype("hdfs"),
 			fuse.VolumeName("HDFS filesystem"),
@@ -63,7 +63,7 @@ func (this *FileSystem) Mount() (*fuse.Conn, error) {
 			fuse.ReadOnly())
 	} else {
 		conn, err = fuse.Mount(
-			this.MountPoint,
+			filesystem.MountPoint,
 			fuse.FSName("hdfs"),
 			fuse.Subtype("hdfs"),
 			fuse.VolumeName("HDFS filesystem"),
@@ -74,24 +74,24 @@ func (this *FileSystem) Mount() (*fuse.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	this.Mounted = true
+	filesystem.Mounted = true
 	return conn, nil
 }
 
 // Unmounts the filesysten (invokes fusermount tool)
-func (this *FileSystem) Unmount() {
-	if !this.Mounted {
+func (filesystem *FileSystem) Unmount() {
+	if !filesystem.Mounted {
 		return
 	}
-	this.Mounted = false
+	filesystem.Mounted = false
 	log.Print("Unmounting...")
-	cmd := exec.Command("fusermount", "-zu", this.MountPoint)
+	cmd := exec.Command("fusermount", "-zu", filesystem.MountPoint)
 	err := cmd.Run()
 
 	// Closing all the files
-	this.closeOnUnmountLock.Lock()
-	defer this.closeOnUnmountLock.Unlock()
-	for _, f := range this.closeOnUnmount {
+	filesystem.closeOnUnmountLock.Lock()
+	defer filesystem.closeOnUnmountLock.Unlock()
+	for _, f := range filesystem.closeOnUnmount {
 		f.Close()
 	}
 
@@ -101,16 +101,16 @@ func (this *FileSystem) Unmount() {
 }
 
 // Returns root directory of the filesystem
-func (this *FileSystem) Root() (fs.Node, error) {
-	return &Dir{FileSystem: this, Attrs: Attrs{Inode: 1, Name: "", Mode: 0755 | os.ModeDir}}, nil
+func (filesystem *FileSystem) Root() (fs.Node, error) {
+	return &Dir{FileSystem: filesystem, Attrs: Attrs{Inode: 1, Name: "", Mode: 0755 | os.ModeDir}}, nil
 }
 
 // Returns if given absoute path allowed by any of the prefixes
-func (this *FileSystem) IsPathAllowed(path string) bool {
+func (filesystem *FileSystem) IsPathAllowed(path string) bool {
 	if path == "/" {
 		return true
 	}
-	for _, prefix := range this.AllowedPrefixes {
+	for _, prefix := range filesystem.AllowedPrefixes {
 		if prefix == "*" {
 			return true
 		}
@@ -123,16 +123,16 @@ func (this *FileSystem) IsPathAllowed(path string) bool {
 }
 
 // Register a file to be closed on Unmount()
-func (this *FileSystem) CloseOnUnmount(file io.Closer) {
-	this.closeOnUnmountLock.Lock()
-	defer this.closeOnUnmountLock.Unlock()
-	this.closeOnUnmount = append(this.closeOnUnmount, file)
+func (filesystem *FileSystem) CloseOnUnmount(file io.Closer) {
+	filesystem.closeOnUnmountLock.Lock()
+	defer filesystem.closeOnUnmountLock.Unlock()
+	filesystem.closeOnUnmount = append(filesystem.closeOnUnmount, file)
 }
 
 // Statfs is called to obtain file system metadata.
 // It should write that data to resp.
-func (this *FileSystem) Statfs(ctx context.Context, req *fuse.StatfsRequest, resp *fuse.StatfsResponse) error {
-	fsInfo, err := this.HdfsAccessor.StatFs()
+func (filesystem *FileSystem) Statfs(ctx context.Context, req *fuse.StatfsRequest, resp *fuse.StatfsResponse) error {
+	fsInfo, err := filesystem.HdfsAccessor.StatFs()
 	if err != nil {
 		Warning.Println("Failed to get HDFS info,", err)
 		return err

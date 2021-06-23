@@ -64,27 +64,27 @@ func NewHdfsAccessor(nameNodeAddresses string, clock Clock, tls bool) (HdfsAcces
 }
 
 // Ensures that metadata client is connected
-func (this *hdfsAccessorImpl) EnsureConnected() error {
-	if this.MetadataClient != nil {
+func (dfs *hdfsAccessorImpl) EnsureConnected() error {
+	if dfs.MetadataClient != nil {
 		return nil
 	}
-	return this.ConnectMetadataClient()
+	return dfs.ConnectMetadataClient()
 }
 
 // Establishes connection to the name node (assigns MetadataClient field)
-func (this *hdfsAccessorImpl) ConnectMetadataClient() error {
-	client, err := this.ConnectToNameNode()
+func (dfs *hdfsAccessorImpl) ConnectMetadataClient() error {
+	client, err := dfs.ConnectToNameNode()
 	if err != nil {
 		return err
 	}
-	this.MetadataClient = client
+	dfs.MetadataClient = client
 	return nil
 }
 
 // Establishes connection to a name node in the context of some other operation
-func (this *hdfsAccessorImpl) ConnectToNameNode() (*hdfs.Client, error) {
+func (dfs *hdfsAccessorImpl) ConnectToNameNode() (*hdfs.Client, error) {
 	// connecting to HDFS name node
-	client, err := this.connectToNameNodeImpl()
+	client, err := dfs.connectToNameNodeImpl()
 	if err != nil {
 		// Connection failed
 		return nil, errors.New(fmt.Sprintf("Fail to connect to name node with error: %s", err.Error()))
@@ -94,11 +94,11 @@ func (this *hdfsAccessorImpl) ConnectToNameNode() (*hdfs.Client, error) {
 }
 
 // Performs an attempt to connect to the HDFS name
-func (this *hdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
+func (dfs *hdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 	// Performing an attempt to connect to the name node
 	// Colinmar's hdfs implementation has supported the multiple name node connection
 	client, err := hdfs.NewClient(hdfs.ClientOptions{
-		Addresses: this.NameNodeAddresses,
+		Addresses: dfs.NameNodeAddresses,
 		TLS:       false,
 		User:      os.Getenv("HADOOP_USER_NAME"),
 	})
@@ -122,16 +122,16 @@ func (this *hdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 }
 
 // Opens HDFS file for reading
-func (this *hdfsAccessorImpl) OpenRead(path string) (ReadSeekCloser, error) {
+func (dfs *hdfsAccessorImpl) OpenRead(path string) (ReadSeekCloser, error) {
 	// Blocking read. This is to reduce the connections pressue on hadoop-name-node
-	this.MetadataClientMutex.Lock()
-	defer this.MetadataClientMutex.Unlock()
-	if this.MetadataClient == nil {
-		if err := this.ConnectMetadataClient(); err != nil {
+	dfs.MetadataClientMutex.Lock()
+	defer dfs.MetadataClientMutex.Unlock()
+	if dfs.MetadataClient == nil {
+		if err := dfs.ConnectMetadataClient(); err != nil {
 			return nil, err
 		}
 	}
-	reader, err := this.MetadataClient.Open(path)
+	reader, err := dfs.MetadataClient.Open(path)
 	if err != nil {
 		return nil, err
 	}
@@ -141,15 +141,15 @@ func (this *hdfsAccessorImpl) OpenRead(path string) (ReadSeekCloser, error) {
 }
 
 // Creates new HDFS file
-func (this *hdfsAccessorImpl) CreateFile(path string, mode os.FileMode) (HdfsWriter, error) {
-	this.MetadataClientMutex.Lock()
-	defer this.MetadataClientMutex.Unlock()
-	if this.MetadataClient == nil {
-		if err := this.ConnectMetadataClient(); err != nil {
+func (dfs *hdfsAccessorImpl) CreateFile(path string, mode os.FileMode) (HdfsWriter, error) {
+	dfs.MetadataClientMutex.Lock()
+	defer dfs.MetadataClientMutex.Unlock()
+	if dfs.MetadataClient == nil {
+		if err := dfs.ConnectMetadataClient(); err != nil {
 			return nil, err
 		}
 	}
-	writer, err := this.MetadataClient.CreateFile(path, 3, 64*1024*1024, mode, false)
+	writer, err := dfs.MetadataClient.CreateFile(path, 3, 64*1024*1024, mode, false)
 	if err != nil {
 		return nil, err
 	}
@@ -158,81 +158,81 @@ func (this *hdfsAccessorImpl) CreateFile(path string, mode os.FileMode) (HdfsWri
 }
 
 // Enumerates HDFS directory
-func (this *hdfsAccessorImpl) ReadDir(path string) ([]Attrs, error) {
-	this.MetadataClientMutex.Lock()
-	defer this.MetadataClientMutex.Unlock()
-	if this.MetadataClient == nil {
-		if err := this.ConnectMetadataClient(); err != nil {
+func (dfs *hdfsAccessorImpl) ReadDir(path string) ([]Attrs, error) {
+	dfs.MetadataClientMutex.Lock()
+	defer dfs.MetadataClientMutex.Unlock()
+	if dfs.MetadataClient == nil {
+		if err := dfs.ConnectMetadataClient(); err != nil {
 			return nil, err
 		}
 	}
-	files, err := this.MetadataClient.ReadDir(path)
+	files, err := dfs.MetadataClient.ReadDir(path)
 	if err != nil {
 		if IsSuccessOrBenignError(err) {
 			// benign error (e.g. path not found)
 			return nil, err
 		}
 		// We've got error from this client, setting to nil, so we try another one next time
-		this.MetadataClient = nil
+		dfs.MetadataClient = nil
 		// TODO: attempt to gracefully close the conenction
 		return nil, err
 	}
 	allAttrs := make([]Attrs, len(files))
 	for i, fileInfo := range files {
-		allAttrs[i] = this.AttrsFromFileInfo(fileInfo)
+		allAttrs[i] = dfs.AttrsFromFileInfo(fileInfo)
 	}
 	return allAttrs, nil
 }
 
 // Retrieves file/directory attributes
-func (this *hdfsAccessorImpl) Stat(path string) (Attrs, error) {
-	this.MetadataClientMutex.Lock()
-	defer this.MetadataClientMutex.Unlock()
+func (dfs *hdfsAccessorImpl) Stat(path string) (Attrs, error) {
+	dfs.MetadataClientMutex.Lock()
+	defer dfs.MetadataClientMutex.Unlock()
 
-	if this.MetadataClient == nil {
-		if err := this.ConnectMetadataClient(); err != nil {
+	if dfs.MetadataClient == nil {
+		if err := dfs.ConnectMetadataClient(); err != nil {
 			return Attrs{}, err
 		}
 	}
 
-	fileInfo, err := this.MetadataClient.Stat(path)
+	fileInfo, err := dfs.MetadataClient.Stat(path)
 	if err != nil {
 		if IsSuccessOrBenignError(err) {
 			// benign error (e.g. path not found)
 			return Attrs{}, err
 		}
 		// We've got error from this client, setting to nil, so we try another one next time
-		this.MetadataClient = nil
+		dfs.MetadataClient = nil
 		// TODO: attempt to gracefully close the conenction
 		return Attrs{}, err
 	}
-	return this.AttrsFromFileInfo(fileInfo), nil
+	return dfs.AttrsFromFileInfo(fileInfo), nil
 }
 
 // Retrieves HDFS usages
-func (this *hdfsAccessorImpl) StatFs() (FsInfo, error) {
-	this.MetadataClientMutex.Lock()
-	defer this.MetadataClientMutex.Unlock()
+func (dfs *hdfsAccessorImpl) StatFs() (FsInfo, error) {
+	dfs.MetadataClientMutex.Lock()
+	defer dfs.MetadataClientMutex.Unlock()
 
-	if this.MetadataClient == nil {
-		if err := this.ConnectMetadataClient(); err != nil {
+	if dfs.MetadataClient == nil {
+		if err := dfs.ConnectMetadataClient(); err != nil {
 			return FsInfo{}, err
 		}
 	}
 
-	fsInfo, err := this.MetadataClient.StatFs()
+	fsInfo, err := dfs.MetadataClient.StatFs()
 	if err != nil {
 		if IsSuccessOrBenignError(err) {
 			return FsInfo{}, err
 		}
-		this.MetadataClient = nil
+		dfs.MetadataClient = nil
 		return FsInfo{}, err
 	}
-	return this.AttrsFromFsInfo(fsInfo), nil
+	return dfs.AttrsFromFsInfo(fsInfo), nil
 }
 
 // Converts os.FileInfo + underlying proto-buf data into Attrs structure
-func (this *hdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
+func (dfs *hdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 	// protoBufDatr := fileInfo.Sys().(*hadoop_hdfs.HdfsFileStatusProto)
 	fi := fileInfo.(*hdfs.FileInfo)
 	mode := os.FileMode(fi.Permission())
@@ -246,14 +246,14 @@ func (this *hdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 		Name:   fileInfo.Name(),
 		Mode:   mode,
 		Size:   fi.Length(),
-		Uid:    this.LookupUid(fi.Owner()),
+		Uid:    dfs.LookupUid(fi.Owner()),
 		Mtime:  modificationTime,
 		Ctime:  modificationTime,
 		Crtime: modificationTime,
 		Gid:    0} // TODO: Group is now hardcoded to be "root", implement proper mapping
 }
 
-func (this *hdfsAccessorImpl) AttrsFromFsInfo(fsInfo hdfs.FsInfo) FsInfo {
+func (dfs *hdfsAccessorImpl) AttrsFromFsInfo(fsInfo hdfs.FsInfo) FsInfo {
 	return FsInfo{
 		capacity:  fsInfo.Capacity,
 		used:      fsInfo.Used,
@@ -265,13 +265,13 @@ func HadoopTimestampToTime(timestamp uint64) time.Time {
 }
 
 // Performs a cache-assisted lookup of UID by username
-func (this *hdfsAccessorImpl) LookupUid(userName string) uint32 {
+func (dfs *hdfsAccessorImpl) LookupUid(userName string) uint32 {
 	if userName == "" {
 		return 0
 	}
 	// Note: this method is called under MetadataClientMutex, so accessing the cache dirctionary is safe
-	cacheEntry, ok := this.UserNameToUidCache[userName]
-	if ok && this.Clock.Now().Before(cacheEntry.Expires) {
+	cacheEntry, ok := dfs.UserNameToUidCache[userName]
+	if ok && dfs.Clock.Now().Before(cacheEntry.Expires) {
 		return cacheEntry.Uid
 	}
 	u, err := user.Lookup(userName)
@@ -283,9 +283,9 @@ func (this *hdfsAccessorImpl) LookupUid(userName string) uint32 {
 	if err != nil {
 		uid64 = (1 << 31) - 1
 	}
-	this.UserNameToUidCache[userName] = UidCacheEntry{
+	dfs.UserNameToUidCache[userName] = UidCacheEntry{
 		Uid:     uint32(uid64),
-		Expires: this.Clock.Now().Add(5 * time.Minute)} // caching UID for 5 minutes
+		Expires: dfs.Clock.Now().Add(5 * time.Minute)} // caching UID for 5 minutes
 	return uint32(uid64)
 }
 
@@ -302,15 +302,15 @@ func IsSuccessOrBenignError(err error) bool {
 }
 
 // Creates a directory
-func (this *hdfsAccessorImpl) Mkdir(path string, mode os.FileMode) error {
-	this.MetadataClientMutex.Lock()
-	defer this.MetadataClientMutex.Unlock()
-	if this.MetadataClient == nil {
-		if err := this.ConnectMetadataClient(); err != nil {
+func (dfs *hdfsAccessorImpl) Mkdir(path string, mode os.FileMode) error {
+	dfs.MetadataClientMutex.Lock()
+	defer dfs.MetadataClientMutex.Unlock()
+	if dfs.MetadataClient == nil {
+		if err := dfs.ConnectMetadataClient(); err != nil {
 			return err
 		}
 	}
-	err := this.MetadataClient.Mkdir(path, mode)
+	err := dfs.MetadataClient.Mkdir(path, mode)
 	if err != nil {
 		if strings.HasSuffix(err.Error(), "file already exists") {
 			err = fuse.EEXIST
@@ -320,61 +320,61 @@ func (this *hdfsAccessorImpl) Mkdir(path string, mode os.FileMode) error {
 }
 
 // Removes file or directory
-func (this *hdfsAccessorImpl) Remove(path string) error {
-	this.MetadataClientMutex.Lock()
-	defer this.MetadataClientMutex.Unlock()
-	if this.MetadataClient == nil {
-		if err := this.ConnectMetadataClient(); err != nil {
+func (dfs *hdfsAccessorImpl) Remove(path string) error {
+	dfs.MetadataClientMutex.Lock()
+	defer dfs.MetadataClientMutex.Unlock()
+	if dfs.MetadataClient == nil {
+		if err := dfs.ConnectMetadataClient(); err != nil {
 			return err
 		}
 	}
-	return this.MetadataClient.Remove(path)
+	return dfs.MetadataClient.Remove(path)
 }
 
 // Renames file or directory
-func (this *hdfsAccessorImpl) Rename(oldPath string, newPath string) error {
-	this.MetadataClientMutex.Lock()
-	defer this.MetadataClientMutex.Unlock()
-	if this.MetadataClient == nil {
-		if err := this.ConnectMetadataClient(); err != nil {
+func (dfs *hdfsAccessorImpl) Rename(oldPath string, newPath string) error {
+	dfs.MetadataClientMutex.Lock()
+	defer dfs.MetadataClientMutex.Unlock()
+	if dfs.MetadataClient == nil {
+		if err := dfs.ConnectMetadataClient(); err != nil {
 			return err
 		}
 	}
-	return this.MetadataClient.Rename(oldPath, newPath)
+	return dfs.MetadataClient.Rename(oldPath, newPath)
 }
 
 // Changes the mode of the file
-func (this *hdfsAccessorImpl) Chmod(path string, mode os.FileMode) error {
-	this.MetadataClientMutex.Lock()
-	defer this.MetadataClientMutex.Unlock()
-	if this.MetadataClient == nil {
-		if err := this.ConnectMetadataClient(); err != nil {
+func (dfs *hdfsAccessorImpl) Chmod(path string, mode os.FileMode) error {
+	dfs.MetadataClientMutex.Lock()
+	defer dfs.MetadataClientMutex.Unlock()
+	if dfs.MetadataClient == nil {
+		if err := dfs.ConnectMetadataClient(); err != nil {
 			return err
 		}
 	}
-	return this.MetadataClient.Chmod(path, mode)
+	return dfs.MetadataClient.Chmod(path, mode)
 }
 
 // Changes the owner and group of the file
-func (this *hdfsAccessorImpl) Chown(path string, user, group string) error {
-	this.MetadataClientMutex.Lock()
-	defer this.MetadataClientMutex.Unlock()
-	if this.MetadataClient == nil {
-		if err := this.ConnectMetadataClient(); err != nil {
+func (dfs *hdfsAccessorImpl) Chown(path string, user, group string) error {
+	dfs.MetadataClientMutex.Lock()
+	defer dfs.MetadataClientMutex.Unlock()
+	if dfs.MetadataClient == nil {
+		if err := dfs.ConnectMetadataClient(); err != nil {
 			return err
 		}
 	}
-	return this.MetadataClient.Chown(path, user, group)
+	return dfs.MetadataClient.Chown(path, user, group)
 }
 
 // Close current connection if needed
-func (this *hdfsAccessorImpl) Close() error {
-	this.MetadataClientMutex.Lock()
-	defer this.MetadataClientMutex.Unlock()
+func (dfs *hdfsAccessorImpl) Close() error {
+	dfs.MetadataClientMutex.Lock()
+	defer dfs.MetadataClientMutex.Unlock()
 
-	if this.MetadataClient != nil {
-		err := this.MetadataClient.Close()
-		this.MetadataClient = nil
+	if dfs.MetadataClient != nil {
+		err := dfs.MetadataClient.Close()
+		dfs.MetadataClient = nil
 		return err
 	}
 	return nil

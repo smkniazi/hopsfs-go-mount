@@ -1,4 +1,4 @@
-module logicalclocks.com/hopsfs-client-test
+module logicalclocks.com/hopsfs-mount
 
 go 1.15
 

@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+
 	"github.com/colinmarc/hdfs/v2"
 )
 
@@ -21,13 +22,13 @@ func NewHdfsReader(backendReader *hdfs.FileReader) ReadSeekCloser {
 }
 
 // Read a chunk of data
-func (this *HdfsReader) Read(buffer []byte) (int, error) {
-	return this.BackendReader.Read(buffer)
+func (hr *HdfsReader) Read(buffer []byte) (int, error) {
+	return hr.BackendReader.Read(buffer)
 }
 
 // Seeks to a given position
-func (this *HdfsReader) Seek(pos int64) error {
-	actualPos, err := this.BackendReader.Seek(pos, 0)
+func (hr *HdfsReader) Seek(pos int64) error {
+	actualPos, err := hr.BackendReader.Seek(pos, 0)
 	if err != nil {
 		return err
 	}
@@ -38,8 +39,8 @@ func (this *HdfsReader) Seek(pos int64) error {
 }
 
 // Returns current position
-func (this *HdfsReader) Position() (int64, error) {
-	actualPos, err := this.BackendReader.Seek(0, 1)
+func (hr *HdfsReader) Position() (int64, error) {
+	actualPos, err := hr.BackendReader.Seek(0, 1)
 	if err != nil {
 		return 0, err
 	}
@@ -47,6 +48,6 @@ func (this *HdfsReader) Position() (int64, error) {
 }
 
 // Closes the stream
-func (this *HdfsReader) Close() error {
-	return this.BackendReader.Close()
+func (hr *HdfsReader) Close() error {
+	return hr.BackendReader.Close()
 }

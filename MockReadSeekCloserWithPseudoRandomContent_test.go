@@ -20,23 +20,23 @@ type MockReadSeekCloserWithPseudoRandomContent struct {
 }
 
 // Seek to a given position
-func (this *MockReadSeekCloserWithPseudoRandomContent) Seek(pos int64) error {
-	this.position = pos
-	this.ReaderStats.IncrementSeek()
+func (mrs *MockReadSeekCloserWithPseudoRandomContent) Seek(pos int64) error {
+	mrs.position = pos
+	mrs.ReaderStats.IncrementSeek()
 	return nil
 }
 
 // Returns current posistion
-func (this *MockReadSeekCloserWithPseudoRandomContent) Position() (int64, error) {
-	return this.position, nil
+func (mrs *MockReadSeekCloserWithPseudoRandomContent) Position() (int64, error) {
+	return mrs.position, nil
 }
 
 // Reads chunk into the specified buffer
-func (this *MockReadSeekCloserWithPseudoRandomContent) Read(buf []byte) (int, error) {
+func (mrs *MockReadSeekCloserWithPseudoRandomContent) Read(buf []byte) (int, error) {
 	// Sleeping for 1ms to yield to other threads
 	time.Sleep(1 * time.Millisecond)
-	this.ReaderStats.IncrementRead()
-	if this.position >= this.FileSize {
+	mrs.ReaderStats.IncrementRead()
+	if mrs.position >= mrs.FileSize {
 		return 0, io.EOF
 	}
 	if len(buf) == 0 {
@@ -44,30 +44,30 @@ func (this *MockReadSeekCloserWithPseudoRandomContent) Read(buf []byte) (int, er
 	}
 	// Deciding how many bytes to return
 	var nr int
-	if this.Rand == nil {
+	if mrs.Rand == nil {
 		// If randomized isn't provided then returning as many as requested
 		nr = len(buf)
 	} else {
 		// Otherwise random length:
 		// Adding 1 to random number sicne we don't want to return 0 bytes
-		nr = this.Rand.Intn(len(buf)) + 1
+		nr = mrs.Rand.Intn(len(buf)) + 1
 	}
 
 	// Adjusting for the case of the reading close to the end of the file
-	if int64(nr) > this.FileSize-this.position {
-		nr = int(this.FileSize - this.position)
+	if int64(nr) > mrs.FileSize-mrs.position {
+		nr = int(mrs.FileSize - mrs.position)
 	}
 	// Programmatically generating data
 	for i := 0; i < nr; i++ {
-		buf[i] = generateByteAtOffset(this.position + int64(i))
+		buf[i] = generateByteAtOffset(mrs.position + int64(i))
 	}
-	this.position += int64(nr)
+	mrs.position += int64(nr)
 	return nr, nil
 }
 
 // Closes all underlying network connections
-func (this *MockReadSeekCloserWithPseudoRandomContent) Close() error {
-	this.IsClosed = true
+func (mrs *MockReadSeekCloserWithPseudoRandomContent) Close() error {
+	mrs.IsClosed = true
 	return nil
 }
 

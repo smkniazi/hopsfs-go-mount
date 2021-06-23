@@ -3,13 +3,14 @@
 package main
 
 import (
-	"bazil.org/fuse"
-	"github.com/golang/mock/gomock"
-	"github.com/stretchr/testify/assert"
 	"os"
 	"path"
 	"runtime"
 	"testing"
+
+	"bazil.org/fuse"
+	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/assert"
 )
 
 // Returns path to test.zip file
@@ -73,7 +74,7 @@ func TestZipDirReadArchive(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, "x", x.(*ZipDir).Attrs.Name)
 	assert.Equal(t, uint32(500), x.(*ZipDir).Attrs.Uid)
-	assert.Equal(t, os.ModeDir | 0775, x.(*ZipDir).Attrs.Mode)
+	assert.Equal(t, os.ModeDir|0775, x.(*ZipDir).Attrs.Mode)
 
 	y, err := x.(*ZipDir).Lookup(nil, "y")
 	assert.Nil(t, err)
@@ -134,21 +135,21 @@ type FileAsReadSeekCloser struct {
 }
 
 // Reads a chunk of data
-func (this *FileAsReadSeekCloser) Read(buffer []byte) (int, error) {
-	return this.File.Read(buffer)
+func (frs *FileAsReadSeekCloser) Read(buffer []byte) (int, error) {
+	return frs.File.Read(buffer)
 }
 
 // Seeks to a given position
-func (this *FileAsReadSeekCloser) Seek(pos int64) error {
-	_, err := this.File.Seek(pos, 0)
+func (frs *FileAsReadSeekCloser) Seek(pos int64) error {
+	_, err := frs.File.Seek(pos, 0)
 	return err
 }
 
 // Returns reading position
-func (this *FileAsReadSeekCloser) Position() (int64, error) {
-	return this.File.Seek(0, 1)
+func (frs *FileAsReadSeekCloser) Position() (int64, error) {
+	return frs.File.Seek(0, 1)
 }
 
-func (this *FileAsReadSeekCloser) Close() error {
-	return this.File.Close()
+func (frs *FileAsReadSeekCloser) Close() error {
+	return frs.File.Close()
 }

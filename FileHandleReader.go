@@ -41,19 +41,19 @@ func NewFileHandleReader(handle *FileHandle) (*FileHandleReader, error) {
 }
 
 // Responds on FUSE Read request. Note: If FUSE requested to read N bytes it expects exactly N, unless EOF
-func (this *FileHandleReader) Read(handle *FileHandle, ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
-	Info.Printf("%s read req  \n", this.Handle.File.Attrs.Name)
+func (fhr *FileHandleReader) Read(handle *FileHandle, ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
+	Info.Printf("%s read req  \n", fhr.Handle.File.Attrs.Name)
 	totalRead := 0
 	buf := resp.Data[0:req.Size]
 	fileOffset := req.Offset
 	var nr int
 	var err error
 	for len(buf) > 0 {
-		nr, err = this.ReadPartial(handle, fileOffset, buf)
+		nr, err = fhr.ReadPartial(handle, fileOffset, buf)
 		if err != nil {
 			break
 		}
-		Info.Printf("%s read bytes %d total read %d \n", this.Handle.File.Attrs.Name, nr, totalRead)
+		Info.Printf("%s read bytes %d total read %d \n", fhr.Handle.File.Attrs.Name, nr, totalRead)
 		totalRead += nr
 		fileOffset += int64(nr)
 		buf = buf[nr:]
@@ -70,39 +70,39 @@ func (this *FileHandleReader) Read(handle *FileHandle, ctx context.Context, req 
 var BLOCKSIZE int = 65536
 
 // Reads chunk of data (satisfies part of FUSE read request)
-func (this *FileHandleReader) ReadPartial(handle *FileHandle, fileOffset int64, buf []byte) (int, error) {
+func (fhr *FileHandleReader) ReadPartial(handle *FileHandle, fileOffset int64, buf []byte) (int, error) {
 	// First checking whether we can satisfy request from buffered file fragments
 	var nr int
-	if this.Buffer1.ReadFromBuffer(fileOffset, buf, &nr) || this.Buffer2.ReadFromBuffer(fileOffset, buf, &nr) {
-		this.CacheHits++
+	if fhr.Buffer1.ReadFromBuffer(fileOffset, buf, &nr) || fhr.Buffer2.ReadFromBuffer(fileOffset, buf, &nr) {
+		fhr.CacheHits++
 		return nr, nil
 	}
 
 	// None of the buffers has the data to satisfy the request, we're going to read more data from backend into Buffer1
 
 	// Before doing that, swapping buffers to keep MRU/LRU invariant
-	this.Buffer2, this.Buffer1 = this.Buffer1, this.Buffer2
+	fhr.Buffer2, fhr.Buffer1 = fhr.Buffer1, fhr.Buffer2
 
 	maxBytesToRead := len(buf)
 	minBytesToRead := 1
 
-	if fileOffset != this.Offset {
+	if fileOffset != fhr.Offset {
 		// We're reading not from the offset expected by the backend stream
 		// we need to decide whether we do Seek(), or read the skipped data (refered as "hole" below)
-		if fileOffset > this.Offset && fileOffset-this.Offset <= int64(BLOCKSIZE*2) {
-			holeSize := int(fileOffset - this.Offset)
-			this.Holes++
+		if fileOffset > fhr.Offset && fileOffset-fhr.Offset <= int64(BLOCKSIZE*2) {
+			holeSize := int(fileOffset - fhr.Offset)
+			fhr.Holes++
 			maxBytesToRead += holeSize    // we're going to read the "hole"
 			minBytesToRead = holeSize + 1 // we need to read at least one byte starting from requested offset
 		} else {
-			this.Seeks++
-			err := this.HdfsReader.Seek(fileOffset)
+			fhr.Seeks++
+			err := fhr.HdfsReader.Seek(fileOffset)
 			// If seek error happens, return err. Seek to the end of the file is not an error.
-			if err != nil && this.Offset > fileOffset {
-				Error.Println("[seek", handle.File.AbsolutePath(), " @offset:", this.Offset, "] Seek error to", fileOffset, "(file offset):", err.Error())
+			if err != nil && fhr.Offset > fileOffset {
+				Error.Println("[seek", handle.File.AbsolutePath(), " @offset:", fhr.Offset, "] Seek error to", fileOffset, "(file offset):", err.Error())
 				return 0, err
 			}
-			this.Offset = fileOffset
+			fhr.Offset = fileOffset
 		}
 	}
 
@@ -110,27 +110,27 @@ func (this *FileHandleReader) ReadPartial(handle *FileHandle, fileOffset int64, 
 	maxBytesToRead = (maxBytesToRead + BLOCKSIZE - 1) / BLOCKSIZE * BLOCKSIZE
 
 	// Reading from backend into Buffer1
-	err := this.Buffer1.ReadFromBackend(this.HdfsReader, &this.Offset, minBytesToRead, maxBytesToRead)
+	err := fhr.Buffer1.ReadFromBackend(fhr.HdfsReader, &fhr.Offset, minBytesToRead, maxBytesToRead)
 	if err != nil {
 		if err == io.EOF {
-			Warning.Println("[", handle.File.AbsolutePath(), "] EOF @", this.Offset)
+			Warning.Println("[", handle.File.AbsolutePath(), "] EOF @", fhr.Offset)
 			return 0, err
 		}
 		return 0, err
 	}
 	// Now Buffer1 has the data to satisfy request
-	if !this.Buffer1.ReadFromBuffer(fileOffset, buf, &nr) {
+	if !fhr.Buffer1.ReadFromBuffer(fileOffset, buf, &nr) {
 		return 0, errors.New("INTERNAL ERROR: FileFragment invariant")
 	}
 	return nr, nil
 }
 
 // Closes the reader
-func (this *FileHandleReader) Close() error {
-	if this.HdfsReader != nil {
-		Info.Println("[", this.Handle.File.AbsolutePath(), "] ReadStats: holes:", this.Holes, ", cache hits:", this.CacheHits, ", hard seeks:", this.Seeks)
-		this.HdfsReader.Close()
-		this.HdfsReader = nil
+func (fhr *FileHandleReader) Close() error {
+	if fhr.HdfsReader != nil {
+		Info.Println("[", fhr.Handle.File.AbsolutePath(), "] ReadStats: holes:", fhr.Holes, ", cache hits:", fhr.CacheHits, ", hard seeks:", fhr.Seeks)
+		fhr.HdfsReader.Close()
+		fhr.HdfsReader = nil
 	}
 	return nil
 }

@@ -30,26 +30,26 @@ func NewHdfsWriter(backendWriter *hdfs.FileWriter) HdfsWriter {
 }
 
 // Seeks to a given position
-func (this *hdfsWriterImpl) Seek(pos int64) error {
+func (w *hdfsWriterImpl) Seek(pos int64) error {
 	return errors.New("Seek is not implemented")
 }
 
 // Writes chunk of data
-func (this *hdfsWriterImpl) Write(buffer []byte) (int, error) {
-	return this.BackendWriter.Write(buffer)
+func (w *hdfsWriterImpl) Write(buffer []byte) (int, error) {
+	return w.BackendWriter.Write(buffer)
 }
 
 // Flushes all the data
-func (this *hdfsWriterImpl) Flush() error {
+func (w *hdfsWriterImpl) Flush() error {
 	return errors.New("Flush is not implemented")
 }
 
 // Closes the stream
-func (this *hdfsWriterImpl) Truncate() error {
+func (w *hdfsWriterImpl) Truncate() error {
 	return errors.New("Truncate is not implemented")
 }
 
 // Truncate the HDFS file at a given position
-func (this *hdfsWriterImpl) Close() error {
-	return this.BackendWriter.Close()
+func (w *hdfsWriterImpl) Close() error {
+	return w.BackendWriter.Close()
 }

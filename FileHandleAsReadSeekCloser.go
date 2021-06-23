@@ -22,27 +22,27 @@ func NewFileHandleAsReadSeekCloser(fileHandle *FileHandle) ReadSeekCloser {
 }
 
 // Reads a chunk of data
-func (this *FileHandleAsReadSeekCloser) Read(buffer []byte) (int, error) {
+func (fhrs *FileHandleAsReadSeekCloser) Read(buffer []byte) (int, error) {
 	resp := fuse.ReadResponse{Data: buffer}
-	err := this.FileHandle.Read(nil, &fuse.ReadRequest{Offset: this.Offset, Size: len(buffer)}, &resp)
-	this.Offset += int64(len(resp.Data))
+	err := fhrs.FileHandle.Read(nil, &fuse.ReadRequest{Offset: fhrs.Offset, Size: len(buffer)}, &resp)
+	fhrs.Offset += int64(len(resp.Data))
 	return len(resp.Data), err
 }
 
 // Seeks to a given position
-func (this *FileHandleAsReadSeekCloser) Seek(pos int64) error {
+func (fhrs *FileHandleAsReadSeekCloser) Seek(pos int64) error {
 	// Note: seek is implemented as virtual operation, error checking will happen
 	// when a Read() is called after a problematic Seek()
-	this.Offset = pos
+	fhrs.Offset = pos
 	return nil
 }
 
 // Returns reading position
-func (this *FileHandleAsReadSeekCloser) Position() (int64, error) {
-	return this.Offset, nil
+func (fhrs *FileHandleAsReadSeekCloser) Position() (int64, error) {
+	return fhrs.Offset, nil
 }
 
 // Closes the underlying file handle
-func (this *FileHandleAsReadSeekCloser) Close() error {
-	return this.FileHandle.Release(nil, nil)
+func (fhrs *FileHandleAsReadSeekCloser) Close() error {
+	return fhrs.FileHandle.Release(nil, nil)
 }

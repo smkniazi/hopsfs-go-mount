@@ -4,9 +4,10 @@ package main
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // Basic test for HdfsRandomAccessReader
@@ -71,6 +72,6 @@ type Mock5GFile struct {
 
 var _ ReadSeekCloserFactory = (*Mock5GFile)(nil) // ensure Mock5GFile  implements ReadSeekCloserFactory
 
-func (this *Mock5GFile) OpenRead() (ReadSeekCloser, error) {
-	return &MockReadSeekCloserWithPseudoRandomContent{FileSize: 5 * 1024 * 1024 * 1024, ReaderStats: this.ReaderStats}, nil
+func (m5gfile *Mock5GFile) OpenRead() (ReadSeekCloser, error) {
+	return &MockReadSeekCloserWithPseudoRandomContent{FileSize: 5 * 1024 * 1024 * 1024, ReaderStats: m5gfile.ReaderStats}, nil
 }

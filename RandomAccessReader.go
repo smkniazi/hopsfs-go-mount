@@ -35,11 +35,11 @@ func NewRandomAccessReader(file ReadSeekCloserFactory) RandomAccessReader {
 	return this
 }
 
-func (this *randomAccessReaderImpl) ReadAt(buffer []byte, offset int64) (int, error) {
-	reader, err := this.getReaderFromPoolOrCreateNew(offset)
+func (rar *randomAccessReaderImpl) ReadAt(buffer []byte, offset int64) (int, error) {
+	reader, err := rar.getReaderFromPoolOrCreateNew(offset)
 	defer func() {
 		if err == nil {
-			this.returnReaderToPool(reader)
+			rar.returnReaderToPool(reader)
 		} else {
 			if reader != nil {
 				go reader.Close()
@@ -64,19 +64,19 @@ func (this *randomAccessReaderImpl) ReadAt(buffer []byte, offset int64) (int, er
 }
 
 // Closes all the readers
-func (this *randomAccessReaderImpl) Close() error {
-	this.PoolLock.Lock()
-	defer this.PoolLock.Unlock()
-	for _, reader := range this.Pool {
+func (rar *randomAccessReaderImpl) Close() error {
+	rar.PoolLock.Lock()
+	defer rar.PoolLock.Unlock()
+	for _, reader := range rar.Pool {
 		reader.Close()
 	}
-	this.Pool = nil
+	rar.Pool = nil
 	return nil
 }
 
 // Retrieves an optimal reader from pool or creates new one
-func (this *randomAccessReaderImpl) getReaderFromPoolOrCreateNew(offset int64) (ReadSeekCloser, error) {
-	reader, err := this.getReaderFromPool(offset)
+func (rar *randomAccessReaderImpl) getReaderFromPoolOrCreateNew(offset int64) (ReadSeekCloser, error) {
+	reader, err := rar.getReaderFromPool(offset)
 	if err != nil {
 		return reader, err
 	}
@@ -84,22 +84,22 @@ func (this *randomAccessReaderImpl) getReaderFromPoolOrCreateNew(offset int64) (
 		return reader, nil
 	} else {
 		// Opening new file handle
-		return this.File.OpenRead()
+		return rar.File.OpenRead()
 	}
 }
 
 // Retrieves an optimal reader from pool or nil if pool is empty
-func (this *randomAccessReaderImpl) getReaderFromPool(offset int64) (ReadSeekCloser, error) {
-	this.PoolLock.Lock()
-	defer this.PoolLock.Unlock()
-	if this.Pool == nil {
+func (rar *randomAccessReaderImpl) getReaderFromPool(offset int64) (ReadSeekCloser, error) {
+	rar.PoolLock.Lock()
+	defer rar.PoolLock.Unlock()
+	if rar.Pool == nil {
 		return nil, errors.New("RandomAccessReader closed")
 	}
-	if len(this.Pool) == 0 {
+	if len(rar.Pool) == 0 {
 		// Empty pool
 		return nil, nil
 	}
-	reader, ok := this.Pool[offset]
+	reader, ok := rar.Pool[offset]
 	var key int64
 	if ok {
 		// Found perfect reader
@@ -107,23 +107,23 @@ func (this *randomAccessReaderImpl) getReaderFromPool(offset int64) (ReadSeekClo
 	} else {
 		// Take a random reader from the map
 		// Note: go randomizes map enumeration, so we're leveraging it here
-		for k, v := range this.Pool {
+		for k, v := range rar.Pool {
 			key = k
 			reader = v
 			break
 		}
 	}
 	// removing from pool before returning
-	delete(this.Pool, key)
+	delete(rar.Pool, key)
 	return reader, nil
 }
 
 // Returns idle reader back to the pool
-func (this *randomAccessReaderImpl) returnReaderToPool(reader ReadSeekCloser) {
-	this.PoolLock.Lock()
-	defer this.PoolLock.Unlock()
+func (rar *randomAccessReaderImpl) returnReaderToPool(reader ReadSeekCloser) {
+	rar.PoolLock.Lock()
+	defer rar.PoolLock.Unlock()
 	// If pool was destroyed or is full then closing current reader w/o returning
-	if this.Pool == nil || len(this.Pool) >= this.MaxReaders {
+	if rar.Pool == nil || len(rar.Pool) >= rar.MaxReaders {
 		go reader.Close()
 		return
 	}
@@ -135,7 +135,7 @@ func (this *randomAccessReaderImpl) returnReaderToPool(reader ReadSeekCloser) {
 		return
 	}
 
-	prevReader, ok := this.Pool[key]
+	prevReader, ok := rar.Pool[key]
 	if ok {
 		// We had other reader at the same position,
 		// closing that one
@@ -143,5 +143,5 @@ func (this *randomAccessReaderImpl) returnReaderToPool(reader ReadSeekCloser) {
 	}
 
 	// Returning reader to the pool
-	this.Pool[key] = reader
+	rar.Pool[key] = reader
 }

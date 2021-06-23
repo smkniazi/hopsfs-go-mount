@@ -59,6 +59,8 @@ func (this *FileHandle) EnableWrite(newFile bool) error {
 
 // Returns attributes of the file associated with this handle
 func (this *FileHandle) Attr(ctx context.Context, a *fuse.Attr) error {
+	this.Mutex.Lock()
+	defer this.Mutex.Unlock()
 	return this.File.Attr(ctx, a)
 }
 
@@ -113,6 +115,8 @@ func (this *FileHandle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error
 
 // Closes the handle
 func (this *FileHandle) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
+	this.Mutex.Lock()
+	defer this.Mutex.Unlock()
 	if this.Reader != nil {
 		err := this.Reader.Close()
 		Info.Println("[", this.File.AbsolutePath(), "] Close/Read: err=", err)

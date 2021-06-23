@@ -3,10 +3,11 @@
 package main
 
 import (
-	"bazil.org/fuse"
 	"errors"
-	"golang.org/x/net/context"
 	"io"
+
+	"bazil.org/fuse"
+	"golang.org/x/net/context"
 )
 
 // Encapsulates state and routines for reading data from the file handle
@@ -27,6 +28,7 @@ type FileHandleReader struct {
 // Opens the reader (creates backend reader)
 func NewFileHandleReader(handle *FileHandle) (*FileHandleReader, error) {
 	this := &FileHandleReader{Handle: handle}
+	Info.Printf("%s reader created ", handle.File.AbsolutePath())
 	var err error
 	this.HdfsReader, err = handle.File.FileSystem.HdfsAccessor.OpenRead(handle.File.AbsolutePath())
 	if err != nil {
@@ -40,6 +42,7 @@ func NewFileHandleReader(handle *FileHandle) (*FileHandleReader, error) {
 
 // Responds on FUSE Read request. Note: If FUSE requested to read N bytes it expects exactly N, unless EOF
 func (this *FileHandleReader) Read(handle *FileHandle, ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
+	Info.Printf("%s read req  \n", this.Handle.File.Attrs.Name)
 	totalRead := 0
 	buf := resp.Data[0:req.Size]
 	fileOffset := req.Offset
@@ -50,6 +53,7 @@ func (this *FileHandleReader) Read(handle *FileHandle, ctx context.Context, req 
 		if err != nil {
 			break
 		}
+		Info.Printf("%s read bytes %d total read %d \n", this.Handle.File.Attrs.Name, nr, totalRead)
 		totalRead += nr
 		fileOffset += int64(nr)
 		buf = buf[nr:]
@@ -94,7 +98,7 @@ func (this *FileHandleReader) ReadPartial(handle *FileHandle, fileOffset int64, 
 			this.Seeks++
 			err := this.HdfsReader.Seek(fileOffset)
 			// If seek error happens, return err. Seek to the end of the file is not an error.
-			if err != nil && this.Offset > fileOffset{
+			if err != nil && this.Offset > fileOffset {
 				Error.Println("[seek", handle.File.AbsolutePath(), " @offset:", this.Offset, "] Seek error to", fileOffset, "(file offset):", err.Error())
 				return 0, err
 			}

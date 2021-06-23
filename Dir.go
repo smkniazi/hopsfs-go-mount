@@ -3,16 +3,17 @@
 package main
 
 import (
-	"bazil.org/fuse"
-	"bazil.org/fuse/fs"
 	"fmt"
-	"golang.org/x/net/context"
 	"os"
 	"os/user"
 	"path"
 	"strings"
 	"sync"
 	"time"
+
+	"bazil.org/fuse"
+	"bazil.org/fuse/fs"
+	"golang.org/x/net/context"
 )
 
 // Encapsulates state and operations for directory node on the HDFS file system

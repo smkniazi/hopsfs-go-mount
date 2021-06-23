@@ -6,10 +6,20 @@ GITCOMMIT=`git rev-parse --short HEAD`
 BUILDTIME=`date +%FT%T%z`
 HOSTNAME=`hostname`
 
-all: hdfs-mount 
+all: hopsfs-mount 
 
-hdfs-mount: *.go 
+hopsfs-mount: *.go 
 	go build -ldflags="-w -X main.GITCOMMIT=${GITCOMMIT} -X main.BUILDTIME=${BUILDTIME} -X main.HOSTNAME=${HOSTNAME}" -o hopsfs-mount
 
 clean:
 	rm -f hopsfs-mount 
+
+mock_%_test.go: %.go 
+	mockgen -source $< -package main  -self_package=logicalclocks.com/hopsfs-mount > $@~
+	mv -f $@~ $@
+
+test: hopsfs-mount \
+	mock_HdfsAccessor_test.go \
+	mock_ReadSeekCloser_test.go \
+	mock_HdfsWriter_test.go
+	go test -coverprofile coverage.txt -covermode atomic

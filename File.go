@@ -87,6 +87,20 @@ func (this *File) AddHandle(handle *FileHandle) {
 	this.activeHandlesMutex.Lock()
 	defer this.activeHandlesMutex.Unlock()
 	this.activeHandles = append(this.activeHandles, handle)
+	if len(this.activeHandles) > 1 {
+		readhandles := 0
+		writehandles := 0
+		for _, h := range this.activeHandles {
+			if h.Reader != nil {
+				readhandles++
+			}
+			if h.Writer != nil {
+				writehandles++
+			}
+		}
+
+		Info.Printf("XXX %s has %d read and %d write handles", this.Attrs.Name, readhandles, writehandles)
+	}
 }
 
 // Unregisters an opened file handle

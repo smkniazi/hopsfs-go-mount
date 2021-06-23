@@ -3,13 +3,14 @@
 package main
 
 import (
-	"bazil.org/fuse"
 	"errors"
-	"golang.org/x/net/context"
 	"io"
 	"io/ioutil"
 	"os"
 	"time"
+
+	"bazil.org/fuse"
+	"golang.org/x/net/context"
 )
 
 // Encapsulates state and routines for writing data from the file handle
@@ -22,8 +23,8 @@ type FileHandleWriter struct {
 // Opens the file for writing
 func NewFileHandleWriter(handle *FileHandle, newFile bool) (*FileHandleWriter, error) {
 	this := &FileHandleWriter{Handle: handle}
-	Info.Println("newFile=", newFile)
 	path := this.Handle.File.AbsolutePath()
+	Info.Printf("Create file %s, newFile: %t ", path, newFile)
 
 	hdfsAccessor := this.Handle.File.FileSystem.HdfsAccessor
 	Info.Println("Attr is ", this.Handle.File.Attrs)
@@ -46,7 +47,9 @@ func NewFileHandleWriter(handle *FileHandle, newFile bool) (*FileHandleWriter, e
 	if err != nil {
 		return nil, err
 	}
-	os.Remove(this.stagingFile.Name()) //TODO: handle error
+	// os.Remove(this.stagingFile.Name()) //TODO: handle error
+
+	Info.Printf("Stagaing file for %s is %s", this.Handle.File.Attrs.Name, this.stagingFile.Name())
 
 	if !newFile {
 		// Request to write to existing file
@@ -56,7 +59,7 @@ func NewFileHandleWriter(handle *FileHandle, newFile bool) (*FileHandleWriter, e
 			return this, nil
 		}
 
-		Info.Println("Buffering contents of the file to the staging area ", this.stagingFile.Name())
+		Info.Printf("Buffering contents of the file %s to the staging area %s", this.Handle.File.Attrs.Name, this.stagingFile.Name())
 		reader, err := hdfsAccessor.OpenRead(path)
 		if err != nil {
 			Warning.Println("HDFS/open failure:", err)
@@ -95,12 +98,14 @@ func (this *FileHandleWriter) Write(handle *FileHandle, ctx context.Context, req
 		return err
 	}
 	this.BytesWritten += uint64(nw)
+
+	Info.Printf("%s write %d bytes", handle.File.Attrs.Name, nw)
 	return nil
 }
 
 // Responds on FUSE Flush/Fsync request
 func (this *FileHandleWriter) Flush() error {
-	Info.Println("[", this.Handle.File.AbsolutePath(), "] flush (", this.BytesWritten, "new bytes written)")
+	Info.Println("[", this.Handle.File.AbsolutePath(), "] flushing (", this.BytesWritten, "new bytes written)")
 	if this.BytesWritten == 0 {
 		// Nothing to do
 		return nil
@@ -111,6 +116,7 @@ func (this *FileHandleWriter) Flush() error {
 	op := this.Handle.File.FileSystem.RetryPolicy.StartOperation()
 	for {
 		err := this.FlushAttempt()
+		Info.Println("[", this.Handle.File.AbsolutePath(), "] flushed (", this.BytesWritten, "new bytes written)")
 		if err != io.EOF || IsSuccessOrBenignError(err) || !op.ShouldRetry("Flush()", err) {
 			return err
 		}
@@ -162,5 +168,6 @@ func (this *FileHandleWriter) FlushAttempt() error {
 
 // Closes the writer
 func (this *FileHandleWriter) Close() error {
+	Info.Printf("Closing staging file %s", this.stagingFile.Name())
 	return this.stagingFile.Close()
 }

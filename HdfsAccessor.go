@@ -99,7 +99,7 @@ func (this *hdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 	// Colinmar's hdfs implementation has supported the multiple name node connection
 	client, err := hdfs.NewClient(hdfs.ClientOptions{
 		Addresses: this.NameNodeAddresses,
-		NoTLS:     true,
+		TLS:       false,
 		User:      os.Getenv("HADOOP_USER_NAME"),
 	})
 	if err != nil {
@@ -135,6 +135,8 @@ func (this *hdfsAccessorImpl) OpenRead(path string) (ReadSeekCloser, error) {
 	if err != nil {
 		return nil, err
 	}
+	Info.Printf("XXX hdfs reader created for %s", path)
+
 	return NewHdfsReader(reader), nil
 }
 
@@ -147,7 +149,7 @@ func (this *hdfsAccessorImpl) CreateFile(path string, mode os.FileMode) (HdfsWri
 			return nil, err
 		}
 	}
-	writer, err := this.MetadataClient.CreateFile(path, 3, 64*1024*1024, mode)
+	writer, err := this.MetadataClient.CreateFile(path, 3, 64*1024*1024, mode, false)
 	if err != nil {
 		return nil, err
 	}

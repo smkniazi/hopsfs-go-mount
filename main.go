@@ -53,6 +53,8 @@ func main() {
 		os.Exit(2)
 	}
 
+	createStagingDir()
+
 	log.Print("hdfs-mount: current head GITCommit: ", GITCOMMIT, ", Built time: ", BUILDTIME, ", Built by:", HOSTNAME)
 
 	allowedPrefixes := strings.Split(*allowedPrefixesString, ",")
@@ -127,5 +129,11 @@ func main() {
 	<-c.Ready
 	if err := c.MountError; err != nil {
 		log.Fatal(err)
+	}
+}
+
+func createStagingDir() {
+	if err := os.MkdirAll(stagingDir, 0700); err != nil {
+		Error.Fatalf("Failed to create stageDir: %d. Error: %v", stagingDir, err)
 	}
 }

@@ -51,9 +51,9 @@ func (fta *FaultTolerantHdfsAccessor) OpenRead(path string) (ReadSeekCloser, err
 }
 
 // Opens HDFS file for writing
-func (fta *FaultTolerantHdfsAccessor) CreateFile(path string, mode os.FileMode) (HdfsWriter, error) {
+func (fta *FaultTolerantHdfsAccessor) CreateFile(path string, mode os.FileMode, overwrite bool) (HdfsWriter, error) {
 	// TODO: implement fault-tolerance. For now re-try-loop is implemented inside FileHandleWriter
-	return fta.Impl.CreateFile(path, mode)
+	return fta.Impl.CreateFile(path, mode, overwrite)
 }
 
 // Enumerates HDFS directory

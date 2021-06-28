@@ -20,18 +20,19 @@ import (
 // Interface for accessing HDFS
 // Concurrency: thread safe: handles unlimited number of concurrent requests
 type HdfsAccessor interface {
-	OpenRead(path string) (ReadSeekCloser, error)                 // Opens HDFS file for reading
-	CreateFile(path string, mode os.FileMode) (HdfsWriter, error) // Opens HDFS file for writing
-	ReadDir(path string) ([]Attrs, error)                         // Enumerates HDFS directory
-	Stat(path string) (Attrs, error)                              // Retrieves file/directory attributes
-	StatFs() (FsInfo, error)                                      // Retrieves HDFS usage
-	Mkdir(path string, mode os.FileMode) error                    // Creates a directory
-	Remove(path string) error                                     // Removes a file or directory
-	Rename(oldPath string, newPath string) error                  // Renames a file or directory
-	EnsureConnected() error                                       // Ensures HDFS accessor is connected to the HDFS name node
-	Chown(path string, owner, group string) error                 // Changes the owner and group of the file
-	Chmod(path string, mode os.FileMode) error                    // Changes the mode of the file
-	Close() error                                                 // Close current meta connection if needed
+	OpenRead(path string) (ReadSeekCloser, error) // Opens HDFS file for reading
+	CreateFile(path string,
+		mode os.FileMode, overwrite bool) (HdfsWriter, error) // Opens HDFS file for writing
+	ReadDir(path string) ([]Attrs, error)         // Enumerates HDFS directory
+	Stat(path string) (Attrs, error)              // Retrieves file/directory attributes
+	StatFs() (FsInfo, error)                      // Retrieves HDFS usage
+	Mkdir(path string, mode os.FileMode) error    // Creates a directory
+	Remove(path string) error                     // Removes a file or directory
+	Rename(oldPath string, newPath string) error  // Renames a file or directory
+	EnsureConnected() error                       // Ensures HDFS accessor is connected to the HDFS name node
+	Chown(path string, owner, group string) error // Changes the owner and group of the file
+	Chmod(path string, mode os.FileMode) error    // Changes the mode of the file
+	Close() error                                 // Close current meta connection if needed
 }
 
 type hdfsAccessorImpl struct {
@@ -141,7 +142,7 @@ func (dfs *hdfsAccessorImpl) OpenRead(path string) (ReadSeekCloser, error) {
 }
 
 // Creates new HDFS file
-func (dfs *hdfsAccessorImpl) CreateFile(path string, mode os.FileMode) (HdfsWriter, error) {
+func (dfs *hdfsAccessorImpl) CreateFile(path string, mode os.FileMode, overwrite bool) (HdfsWriter, error) {
 	dfs.MetadataClientMutex.Lock()
 	defer dfs.MetadataClientMutex.Unlock()
 	if dfs.MetadataClient == nil {
@@ -149,7 +150,7 @@ func (dfs *hdfsAccessorImpl) CreateFile(path string, mode os.FileMode) (HdfsWrit
 			return nil, err
 		}
 	}
-	writer, err := dfs.MetadataClient.CreateFile(path, 3, 64*1024*1024, mode, false)
+	writer, err := dfs.MetadataClient.CreateFile(path, 3, 64*1024*1024, mode, overwrite)
 	if err != nil {
 		return nil, err
 	}

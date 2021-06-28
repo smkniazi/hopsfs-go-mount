@@ -29,8 +29,7 @@ func NewFileHandleWriter(handle *FileHandle, newFile bool) (*FileHandleWriter, e
 	hdfsAccessor := fhw.Handle.File.FileSystem.HdfsAccessor
 	Info.Println("Attr is ", fhw.Handle.File.Attrs)
 	if newFile {
-		hdfsAccessor.Remove(path)
-		w, err := hdfsAccessor.CreateFile(path, fhw.Handle.File.Attrs.Mode)
+		w, err := hdfsAccessor.CreateFile(path, fhw.Handle.File.Attrs.Mode, true)
 		if err != nil {
 			Error.Println("Creating", path, ":", path, err)
 			return nil, err
@@ -133,15 +132,14 @@ func (fhw *FileHandleWriter) Flush() error {
 // Single attempt to flush a file
 func (fhw *FileHandleWriter) FlushAttempt() error {
 	hdfsAccessor := fhw.Handle.File.FileSystem.HdfsAccessor
-	hdfsAccessor.Remove(fhw.Handle.File.AbsolutePath())
-	w, err := hdfsAccessor.CreateFile(fhw.Handle.File.AbsolutePath(), fhw.Handle.File.Attrs.Mode)
+	w, err := hdfsAccessor.CreateFile(fhw.Handle.File.AbsolutePath(), fhw.Handle.File.Attrs.Mode, true)
 	if err != nil {
 		Error.Println("ERROR creating", fhw.Handle.File.AbsolutePath(), ":", err)
 		return err
 	}
 
 	fhw.stagingFile.Seek(0, 0)
-	b := make([]byte, 65536, 65536)
+	b := make([]byte, 65536)
 	for {
 		nr, err := fhw.stagingFile.Read(b)
 		if err != nil {

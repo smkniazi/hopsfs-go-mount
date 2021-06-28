@@ -205,10 +205,9 @@ func (dir *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, err
 
 // Responds on FUSE Create request
 func (dir *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
-	Info.Println("[", dir.AbsolutePathForChild(req.Name), "] Create ", req.Mode)
+	Info.Printf("Create %s,  mode: %v, flags: %v  ", dir.AbsolutePathForChild(req.Name), req.Mode, req.Flags)
 	file := dir.NodeFromAttrs(Attrs{Name: req.Name, Mode: req.Mode}).(*File)
-	handle := NewFileHandle(file)
-	err := handle.EnableWrite(true)
+	handle, err := NewFileHandle(file, false, req.Flags)
 	if err != nil {
 		Error.Println("Can't create file: ", dir.AbsolutePathForChild(req.Name), err)
 		return nil, nil, err

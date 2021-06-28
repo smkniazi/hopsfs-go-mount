@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"os/user"
 	"path"
 	"sync"
@@ -21,6 +22,7 @@ type File struct {
 
 	activeHandles      []*FileHandle // list of opened file handles
 	activeHandlesMutex sync.Mutex    // mutex for activeHandles
+	tmpFile            string        // temporary copy of the file
 }
 
 // Verify that *File implements necesary FUSE interfaces
@@ -32,7 +34,7 @@ var _ fs.NodeSetattrer = (*File)(nil)
 // File is also a factory for ReadSeekCloser objects
 var _ ReadSeekCloserFactory = (*File)(nil)
 
-// Retunds absolute path of the file in HDFS namespace
+// Retuns absolute path of the file in HDFS namespace
 func (file *File) AbsolutePath() string {
 	return path.Join(file.Parent.AbsolutePath(), file.Attrs.Name)
 }
@@ -50,23 +52,13 @@ func (file *File) Attr(ctx context.Context, a *fuse.Attr) error {
 
 // Responds to the FUSE file open request (creates new file handle)
 func (file *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
-	Info.Println("Open: ", file.AbsolutePath(), req.Flags)
-	handle := NewFileHandle(file)
-	if req.Flags.IsReadOnly() || req.Flags.IsReadWrite() {
-		err := handle.EnableRead()
-		if err != nil {
-			return nil, err
-		}
-	}
+	file.activeHandlesMutex.Lock()
+	defer file.activeHandlesMutex.Unlock()
 
-	if req.Flags.IsWriteOnly() {
-		// Enabling write only if opened in WriteOnly mode
-		// In Read+Write scenario, write wills be enabled in lazy manner (on first write)
-		newFile := req.Flags.IsWriteOnly() && (req.Flags&fuse.OpenAppend != fuse.OpenAppend)
-		err := handle.EnableWrite(newFile)
-		if err != nil {
-			return nil, err
-		}
+	Info.Printf("Open: %s, Flags %v", file.AbsolutePath(), req.Flags)
+	handle, err := NewFileHandle(file, true, req.Flags)
+	if err != nil {
+		return nil, err
 	}
 
 	file.AddHandle(handle)
@@ -75,38 +67,24 @@ func (file *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Op
 
 // Opens file for reading
 func (file *File) OpenRead() (ReadSeekCloser, error) {
-	handle, err := file.Open(nil, &fuse.OpenRequest{Flags: fuse.OpenReadOnly}, nil)
-	if err != nil {
-		return nil, err
-	}
-	return NewFileHandleAsReadSeekCloser(handle.(*FileHandle)), nil
+	Error.Panic("Unsupported operation")
+	os.Exit(1)
+
+	return nil, nil
+	//	handle, err := file.Open(nil, &fuse.OpenRequest{Flags: fuse.OpenReadOnly}, nil)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	return NewFileHandleAsReadSeekCloser(handle.(*FileHandle)), nil
 }
 
 // Registers an opened file handle
 func (file *File) AddHandle(handle *FileHandle) {
-	file.activeHandlesMutex.Lock()
-	defer file.activeHandlesMutex.Unlock()
 	file.activeHandles = append(file.activeHandles, handle)
-	if len(file.activeHandles) > 1 {
-		readhandles := 0
-		writehandles := 0
-		for _, h := range file.activeHandles {
-			if h.Reader != nil {
-				readhandles++
-			}
-			if h.Writer != nil {
-				writehandles++
-			}
-		}
-
-		Info.Printf("XXX %s has %d read and %d write handles", file.Attrs.Name, readhandles, writehandles)
-	}
 }
 
 // Unregisters an opened file handle
 func (file *File) RemoveHandle(handle *FileHandle) {
-	file.activeHandlesMutex.Lock()
-	defer file.activeHandlesMutex.Unlock()
 	for i, h := range file.activeHandles {
 		if h == handle {
 			file.activeHandles = append(file.activeHandles[:i], file.activeHandles[i+1:]...)
@@ -119,6 +97,7 @@ func (file *File) RemoveHandle(handle *FileHandle) {
 func (file *File) GetActiveHandles() []*FileHandle {
 	file.activeHandlesMutex.Lock()
 	defer file.activeHandlesMutex.Unlock()
+
 	snapshot := make([]*FileHandle, len(file.activeHandles))
 	copy(snapshot, file.activeHandles)
 	return snapshot

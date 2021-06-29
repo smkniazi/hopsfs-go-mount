@@ -7,6 +7,7 @@ import (
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
+	logger "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 )
 
@@ -30,7 +31,7 @@ func (zipfile *ZipFile) Attr(ctx context.Context, fuseAttr *fuse.Attr) error {
 func (zipfile *ZipFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
 	contentStream, err := zipfile.zipFile.Open()
 	if err != nil {
-		Error.Println("Opening [", zipfile.Attrs.Name, "], error: ", err)
+		logger.WithFields(logger.Fields{Operation: OpenArch, Archive: zipfile.Attrs.Name, Error: err}).Error("Opened zip file failed")
 		return nil, err
 	}
 	// reporting to FUSE that the stream isn't seekable

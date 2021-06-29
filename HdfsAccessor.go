@@ -90,7 +90,6 @@ func (dfs *hdfsAccessorImpl) ConnectToNameNode() (*hdfs.Client, error) {
 		// Connection failed
 		return nil, errors.New(fmt.Sprintf("Fail to connect to name node with error: %s", err.Error()))
 	}
-	Info.Println("Connected to name node")
 	return client, nil
 }
 
@@ -136,8 +135,6 @@ func (dfs *hdfsAccessorImpl) OpenRead(path string) (ReadSeekCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	Info.Printf("XXX hdfs reader created for %s", path)
-
 	return NewHdfsReader(reader), nil
 }
 

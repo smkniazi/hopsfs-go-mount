@@ -4,7 +4,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"os/user"
 	"path"
 	"sync"
@@ -12,6 +11,7 @@ import (
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
+	logger "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 )
 
@@ -55,7 +55,7 @@ func (file *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Op
 	file.activeHandlesMutex.Lock()
 	defer file.activeHandlesMutex.Unlock()
 
-	Info.Printf("Open: %s, Flags %v", file.AbsolutePath(), req.Flags)
+	logger.WithFields(logger.Fields{Operation: Open, Path: file.AbsolutePath(), Flags: req.Flags}).Info("Opening file")
 	handle, err := NewFileHandle(file, true, req.Flags)
 	if err != nil {
 		return nil, err
@@ -67,9 +67,7 @@ func (file *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Op
 
 // Opens file for reading
 func (file *File) OpenRead() (ReadSeekCloser, error) {
-	Error.Panic("Unsupported operation")
-	os.Exit(1)
-
+	logger.WithFields(logger.Fields{Operation: Open, Path: file.AbsolutePath()}).Panic("Unsupported operation")
 	return nil, nil
 	//	handle, err := file.Open(nil, &fuse.OpenRequest{Flags: fuse.OpenReadOnly}, nil)
 	//	if err != nil {
@@ -105,7 +103,8 @@ func (file *File) GetActiveHandles() []*FileHandle {
 
 // Responds to the FUSE Fsync request
 func (file *File) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
-	Info.Println("Dispatching fsync request to open handles: ", len(file.GetActiveHandles()))
+
+	logger.WithFields(logger.Fields{Operation: Fsync}).Infof("Dispatching fsync request to open handles: %d ", len(file.GetActiveHandles()))
 	var retErr error
 	for _, handle := range file.GetActiveHandles() {
 		err := handle.Fsync(ctx, req)
@@ -128,7 +127,7 @@ func (file *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *f
 	var err error
 
 	if req.Valid.Mode() {
-		Info.Println("Chmod [", path, "] to [", req.Mode, "]")
+		logger.WithFields(logger.Fields{Operation: Chmod, Path: path, Mode: req.Mode}).Info("Setting attributes")
 		(func() {
 			err = file.FileSystem.HdfsAccessor.Chmod(path, req.Mode)
 			if err != nil {
@@ -137,7 +136,8 @@ func (file *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *f
 		})()
 
 		if err != nil {
-			Error.Println("Chmod failed with error: ", err)
+			logger.WithFields(logger.Fields{Operation: Chmod, Path: path, Mode: req.Mode, Error: err}).
+				Error("Failed to set attributes")
 		} else {
 			file.Attrs.Mode = req.Mode
 		}
@@ -148,22 +148,26 @@ func (file *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *f
 		owner := fmt.Sprint(req.Uid)
 		group := fmt.Sprint(req.Gid)
 		if err != nil {
-			Error.Println("Chown: username for uid", req.Uid, "not found, use uid/gid instead")
+			logger.WithFields(logger.Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err}).
+				Error("Chown: username for uid", req.Uid, "not found, use uid/gid instead")
 		} else {
 			owner = u.Username
 			group = owner // hardcoded the group same as owner
 		}
 
-		Info.Println("Chown [", path, "] to [", owner, ":", group, "]")
+		logger.WithFields(logger.Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group}).Info("Chown")
 		(func() {
 			err = file.FileSystem.HdfsAccessor.Chown(path, fmt.Sprint(req.Uid), fmt.Sprint(req.Gid))
 			if err != nil {
+				logger.WithFields(logger.Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err}).
+					Error("Chown failed on DFS")
 				return
 			}
 		})()
 
 		if err != nil {
-			Error.Println("Chown failed with error:", err)
+			logger.WithFields(logger.Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err}).
+				Error("Chown failed")
 		} else {
 			file.Attrs.Uid = req.Uid
 			file.Attrs.Gid = req.Gid

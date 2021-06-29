@@ -11,6 +11,8 @@ import (
 
 	"bazil.org/fuse"
 	"golang.org/x/net/context"
+
+	logger "github.com/sirupsen/logrus"
 )
 
 // Encapsulates state and routines for writing data from the file handle
@@ -24,22 +26,21 @@ type FileHandleWriter struct {
 func NewFileHandleWriter(handle *FileHandle, newFile bool) (*FileHandleWriter, error) {
 	fhw := &FileHandleWriter{Handle: handle}
 	path := fhw.Handle.File.AbsolutePath()
-	Info.Printf("Create file %s, newFile: %t ", path, newFile)
+	logger.WithFields(logger.Fields{Operation: WriteHandle, Path: path}).Infof("Creating file write handle. Newfile %t", newFile)
 
 	hdfsAccessor := fhw.Handle.File.FileSystem.HdfsAccessor
-	Info.Println("Attr is ", fhw.Handle.File.Attrs)
 	if newFile {
 		w, err := hdfsAccessor.CreateFile(path, fhw.Handle.File.Attrs.Mode, true)
 		if err != nil {
-			Error.Println("Creating", path, ":", path, err)
+			logger.WithFields(logger.Fields{Operation: WriteHandle, Path: path, Error: err}).Warn("Failed to create file in DFS")
 			return nil, err
 		}
 		w.Close()
 	}
 
-	if ok := os.MkdirAll(stagingDir, 0700); ok != nil {
-		Error.Println("Failed to create stageDir", stagingDir, ", Error:", ok)
-		return nil, ok
+	if err := os.MkdirAll(stagingDir, 0700); err != nil {
+		logger.WithFields(logger.Fields{Operation: WriteHandle, Path: path, Error: err}).Warn("Failed to create staging dir")
+		return nil, err
 	}
 	var err error
 	fhw.stagingFile, err = ioutil.TempFile(stagingDir, "stage")
@@ -48,33 +49,31 @@ func NewFileHandleWriter(handle *FileHandle, newFile bool) (*FileHandleWriter, e
 	}
 	// os.Remove(this.stagingFile.Name()) //TODO: handle error
 
-	Info.Printf("Stagaing file for %s is %s", fhw.Handle.File.Attrs.Name, fhw.stagingFile.Name())
-
+	logger.WithFields(logger.Fields{Operation: WriteHandle, Path: path, TmpFile: fhw.stagingFile.Name()}).Info("Created Staging file")
 	if !newFile {
 		// Request to write to existing file
 		_, err := hdfsAccessor.Stat(path)
 		if err != nil {
-			Warning.Println("[", path, "] Can't stat file:", err)
+			logger.WithFields(logger.Fields{Operation: WriteHandle, Path: path, Error: err}).Warn("Failed to stat file in DFS")
 			return fhw, nil
 		}
 
-		Info.Printf("Buffering contents of the file %s to the staging area %s", fhw.Handle.File.Attrs.Name, fhw.stagingFile.Name())
 		reader, err := hdfsAccessor.OpenRead(path)
 		if err != nil {
-			Warning.Println("HDFS/open failure:", err)
+			logger.WithFields(logger.Fields{Operation: WriteHandle, Path: path, Error: err}).Warn("Failed to open file in DFS")
 			fhw.stagingFile.Close()
 			fhw.stagingFile = nil
 			return nil, err
 		}
 		nc, err := io.Copy(fhw.stagingFile, reader)
 		if err != nil {
-			Warning.Println("Copy failure:", err)
+			logger.WithFields(logger.Fields{Operation: WriteHandle, Path: path, TmpFile: fhw.stagingFile.Name(), Error: err}).Warn("Failed to copy file from DFS")
 			fhw.stagingFile.Close()
 			fhw.stagingFile = nil
 			return nil, err
 		}
 		reader.Close()
-		Info.Println("Copied", nc, "bytes")
+		logger.WithFields(logger.Fields{Operation: WriteHandle, Path: path, TmpFile: fhw.stagingFile.Name(), Bytes: nc}).Info("Copied data to staging file")
 	}
 
 	return fhw, nil
@@ -85,9 +84,9 @@ func (fhw *FileHandleWriter) Write(handle *FileHandle, ctx context.Context, req 
 	fsInfo, err := fhw.Handle.File.FileSystem.HdfsAccessor.StatFs()
 	if err != nil {
 		// Donot abort, continue writing
-		Error.Println("Failed to get HDFS usage, ERROR:", err)
+		logger.WithFields(logger.Fields{Operation: Write, Path: handle.File.AbsolutePath(), Error: err}).Warn("Failed to get DFS usage")
 	} else if uint64(req.Offset) >= fsInfo.remaining {
-		Error.Println("[", fhw.Handle.File.AbsolutePath(), "] writes larger size (", req.Offset, ")than HDFS available size (", fsInfo.remaining, ")")
+		logger.WithFields(logger.Fields{Operation: Write, Path: handle.File.AbsolutePath()}).Error("Too large file")
 		return errors.New("Too large file")
 	}
 
@@ -98,13 +97,12 @@ func (fhw *FileHandleWriter) Write(handle *FileHandle, ctx context.Context, req 
 	}
 	fhw.BytesWritten += uint64(nw)
 
-	Info.Printf("%s write %d bytes", handle.File.Attrs.Name, nw)
+	logger.WithFields(logger.Fields{Operation: Write, Path: handle.File.AbsolutePath(), Bytes: nw}).Error("Written data")
 	return nil
 }
 
 // Responds on FUSE Flush/Fsync request
 func (fhw *FileHandleWriter) Flush() error {
-	Info.Println("[", fhw.Handle.File.AbsolutePath(), "] flushing (", fhw.BytesWritten, "new bytes written)")
 	if fhw.BytesWritten == 0 {
 		// Nothing to do
 		return nil
@@ -115,13 +113,13 @@ func (fhw *FileHandleWriter) Flush() error {
 	op := fhw.Handle.File.FileSystem.RetryPolicy.StartOperation()
 	for {
 		err := fhw.FlushAttempt()
-		Info.Println("[", fhw.Handle.File.AbsolutePath(), "] flushed (", fhw.BytesWritten, "new bytes written)")
+		logger.WithFields(logger.Fields{Operation: Flush, Path: fhw.Handle.File.AbsolutePath(), Bytes: fhw.BytesWritten}).Info("Flushed data")
 		if err != io.EOF || IsSuccessOrBenignError(err) || !op.ShouldRetry("Flush()", err) {
 			return err
 		}
 		// Restart a new connection, https://github.com/colinmarc/hdfs/issues/86
 		fhw.Handle.File.FileSystem.HdfsAccessor.Close()
-		Error.Println("[", fhw.Handle.File.AbsolutePath(), "] failed flushing. Retry")
+		logger.WithFields(logger.Fields{Operation: Flush, Path: fhw.Handle.File.AbsolutePath(), Error: err}).Warn("Flushed failed")
 		// Wait for 30 seconds before another retry to get another set of datanodes.
 		// https://community.hortonworks.com/questions/2474/how-to-identify-stale-datanode.html
 		time.Sleep(30 * time.Second)
@@ -134,7 +132,7 @@ func (fhw *FileHandleWriter) FlushAttempt() error {
 	hdfsAccessor := fhw.Handle.File.FileSystem.HdfsAccessor
 	w, err := hdfsAccessor.CreateFile(fhw.Handle.File.AbsolutePath(), fhw.Handle.File.Attrs.Mode, true)
 	if err != nil {
-		Error.Println("ERROR creating", fhw.Handle.File.AbsolutePath(), ":", err)
+		logger.WithFields(logger.Fields{Operation: Flush, Path: fhw.Handle.File.AbsolutePath(), Error: err}).Warn("Error creating file in DFS")
 		return err
 	}
 
@@ -149,7 +147,7 @@ func (fhw *FileHandleWriter) FlushAttempt() error {
 
 		_, err = w.Write(b)
 		if err != nil {
-			Error.Println("Writing", fhw.Handle.File.AbsolutePath(), ":", err)
+			logger.WithFields(logger.Fields{Operation: Flush, Path: fhw.Handle.File.AbsolutePath(), Error: err}).Warn("Error writing file in DFS")
 			w.Close()
 			return err
 		}
@@ -157,7 +155,7 @@ func (fhw *FileHandleWriter) FlushAttempt() error {
 	}
 	err = w.Close()
 	if err != nil {
-		Error.Println("Closing", fhw.Handle.File.AbsolutePath(), ":", err)
+		logger.WithFields(logger.Fields{Operation: Flush, Path: fhw.Handle.File.AbsolutePath(), Error: err}).Warn("Error closing file in DFS")
 		return err
 	}
 
@@ -166,6 +164,6 @@ func (fhw *FileHandleWriter) FlushAttempt() error {
 
 // Closes the writer
 func (fhw *FileHandleWriter) Close() error {
-	Info.Printf("Closing staging file %s", fhw.stagingFile.Name())
+	logger.WithFields(logger.Fields{Operation: Flush, Path: fhw.Handle.File.AbsolutePath()}).Warn("Closing staging file")
 	return fhw.stagingFile.Close()
 }

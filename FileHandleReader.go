@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"bazil.org/fuse"
+	logger "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 )
 
@@ -28,21 +29,20 @@ type FileHandleReader struct {
 // Opens the reader (creates backend reader)
 func NewFileHandleReader(handle *FileHandle) (*FileHandleReader, error) {
 	this := &FileHandleReader{Handle: handle}
-	Info.Printf("%s reader created ", handle.File.AbsolutePath())
 	var err error
 	this.HdfsReader, err = handle.File.FileSystem.HdfsAccessor.OpenRead(handle.File.AbsolutePath())
 	if err != nil {
-		Error.Println("[", handle.File.AbsolutePath(), "] Opening: ", err)
+		logger.WithFields(logger.Fields{Operation: ReadHandle, Path: handle.File.AbsolutePath(), Error: err}).Error("Failed to open file in DFS")
 		return nil, err
 	}
 	this.Buffer1 = &FileFragment{}
 	this.Buffer2 = &FileFragment{}
+	logger.WithFields(logger.Fields{Operation: ReadHandle, Path: handle.File.AbsolutePath()}).Info("Reader handle created")
 	return this, nil
 }
 
 // Responds on FUSE Read request. Note: If FUSE requested to read N bytes it expects exactly N, unless EOF
 func (fhr *FileHandleReader) Read(handle *FileHandle, ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
-	Info.Printf("%s read req  \n", fhr.Handle.File.Attrs.Name)
 	totalRead := 0
 	buf := resp.Data[0:req.Size]
 	fileOffset := req.Offset
@@ -53,18 +53,18 @@ func (fhr *FileHandleReader) Read(handle *FileHandle, ctx context.Context, req *
 		if err != nil {
 			break
 		}
-		Info.Printf("%s read bytes %d total read %d \n", fhr.Handle.File.Attrs.Name, nr, totalRead)
+		logger.WithFields(logger.Fields{Operation: Read, Path: handle.File.AbsolutePath(), Bytes: totalRead}).Trace("Read chunk")
 		totalRead += nr
 		fileOffset += int64(nr)
 		buf = buf[nr:]
 	}
 	resp.Data = resp.Data[0:totalRead]
-	if err == io.EOF {
-		// EOF isn't a error, reporting successful read to FUSE
-		return nil
-	} else {
+	if err != nil && err != io.EOF {
+		logger.WithFields(logger.Fields{Operation: Read, Path: handle.File.AbsolutePath(), Error: err}).Warn("Read failed")
 		return err
 	}
+	logger.WithFields(logger.Fields{Operation: Read, Path: handle.File.AbsolutePath(), Bytes: totalRead}).Info("Read")
+	return nil
 }
 
 var BLOCKSIZE int = 65536
@@ -99,7 +99,8 @@ func (fhr *FileHandleReader) ReadPartial(handle *FileHandle, fileOffset int64, b
 			err := fhr.HdfsReader.Seek(fileOffset)
 			// If seek error happens, return err. Seek to the end of the file is not an error.
 			if err != nil && fhr.Offset > fileOffset {
-				Error.Println("[seek", handle.File.AbsolutePath(), " @offset:", fhr.Offset, "] Seek error to", fileOffset, "(file offset):", err.Error())
+				logger.WithFields(logger.Fields{Operation: Read, Path: handle.File.AbsolutePath(), Error: err}).
+					Error("Read partial failed due to failed seek. ", " @offset:", fhr.Offset, " Seek error to", fileOffset)
 				return 0, err
 			}
 			fhr.Offset = fileOffset
@@ -113,7 +114,7 @@ func (fhr *FileHandleReader) ReadPartial(handle *FileHandle, fileOffset int64, b
 	err := fhr.Buffer1.ReadFromBackend(fhr.HdfsReader, &fhr.Offset, minBytesToRead, maxBytesToRead)
 	if err != nil {
 		if err == io.EOF {
-			Warning.Println("[", handle.File.AbsolutePath(), "] EOF @", fhr.Offset)
+			logger.WithFields(logger.Fields{Operation: Read, Path: handle.File.AbsolutePath(), Error: err}).Warn("EOF @ ", fhr.Offset)
 			return 0, err
 		}
 		return 0, err
@@ -128,7 +129,7 @@ func (fhr *FileHandleReader) ReadPartial(handle *FileHandle, fileOffset int64, b
 // Closes the reader
 func (fhr *FileHandleReader) Close() error {
 	if fhr.HdfsReader != nil {
-		Info.Println("[", fhr.Handle.File.AbsolutePath(), "] ReadStats: holes:", fhr.Holes, ", cache hits:", fhr.CacheHits, ", hard seeks:", fhr.Seeks)
+		logger.WithFields(logger.Fields{Operation: Read, Path: fhr.Handle.File.AbsolutePath(), Holes: fhr.Holes, CacheHits: fhr.CacheHits, HardSeeks: fhr.Seeks}).Info("Reader closed")
 		fhr.HdfsReader.Close()
 		fhr.HdfsReader = nil
 	}

@@ -9,6 +9,7 @@ import (
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
+	logger "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 )
 
@@ -62,14 +63,14 @@ func (zd *ZipDir) ReadArchive() error {
 	var attr fuse.Attr
 	err := zd.ZipContainerFile.Attr(nil, &attr)
 	if err != nil {
-		Error.Println("Error opening zip file: ", zd.ZipContainerFile.AbsolutePath(), " : ", err.Error())
+		logger.WithFields(logger.Fields{Operation: ReadArch, Archive: zd.ZipContainerFile.AbsolutePath(), Error: err}).Error("Error getting attrs")
 		return err
 	}
 	zipArchiveReader, err := zip.NewReader(randomAccessReader, int64(attr.Size))
 	if err == nil {
-		Info.Println("Opened zip file: ", zd.ZipContainerFile.AbsolutePath())
+		logger.WithFields(logger.Fields{Operation: ReadArch, Archive: zd.ZipContainerFile.AbsolutePath()}).Info("Opened zip file")
 	} else {
-		Error.Println("Opening zip file: ", zd.ZipContainerFile.AbsolutePath(), " : ", err.Error())
+		logger.WithFields(logger.Fields{Operation: ReadArch, Archive: zd.ZipContainerFile.AbsolutePath(), Error: err}).Error("Error opening zip file")
 		return err
 	}
 

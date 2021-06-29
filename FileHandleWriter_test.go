@@ -1,14 +1,15 @@
 package main
 
 import (
-	"bazil.org/fuse"
 	"errors"
 	"flag"
-	"github.com/golang/mock/gomock"
-	"github.com/stretchr/testify/assert"
 	"io"
 	"os"
 	"testing"
+
+	"bazil.org/fuse"
+	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/assert"
 )
 
 func init() {
@@ -24,7 +25,7 @@ func TestWriteFile(t *testing.T) {
 
 	hdfswriter := NewMockHdfsWriter(mockCtrl)
 	hdfsAccessor.EXPECT().Remove(fileName).Return(nil)
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757)).Return(hdfswriter, nil)
+	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil)
 	hdfswriter.EXPECT().Close().Return(nil)
 
 	hdfsAccessor.EXPECT().Remove(fileName).Return(nil)
@@ -32,7 +33,7 @@ func TestWriteFile(t *testing.T) {
 	_, h, _ := root.(*Dir).Create(nil, &fuse.CreateRequest{Name: fileName, Mode: os.FileMode(0757)}, &fuse.CreateResponse{})
 
 	// Test for newfilehandlewriter
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757)).Return(hdfswriter, nil)
+	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil)
 	hdfswriter.EXPECT().Close().Return(nil)
 	writeHandle, err := NewFileHandleWriter(h.(*FileHandle), true)
 	assert.Nil(t, err)
@@ -44,7 +45,7 @@ func TestWriteFile(t *testing.T) {
 	assert.Equal(t, writeHandle.BytesWritten, uint64(11))
 
 	hdfsAccessor.EXPECT().Remove("/testWriteFile_1").Return(nil)
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757)).Return(hdfswriter, nil)
+	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil)
 	hdfswriter.EXPECT().Close().Return(nil)
 	binaryData := make([]byte, 65536, 65536)
 	nr, _ := writeHandle.stagingFile.Read(binaryData)
@@ -72,7 +73,7 @@ func TestFaultTolerantWriteFile(t *testing.T) {
 
 	hdfswriter := NewMockHdfsWriter(mockCtrl)
 	hdfsAccessor.EXPECT().Remove(fileName).Return(nil)
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757)).Return(hdfswriter, nil)
+	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil)
 	hdfswriter.EXPECT().Close().Return(nil)
 
 	hdfsAccessor.EXPECT().Remove(fileName).Return(nil)
@@ -80,7 +81,7 @@ func TestFaultTolerantWriteFile(t *testing.T) {
 	_, h, _ := root.(*Dir).Create(nil, &fuse.CreateRequest{Name: fileName, Mode: os.FileMode(0757)}, &fuse.CreateResponse{})
 
 	// Test for newfilehandlewriter
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757)).Return(hdfswriter, nil)
+	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil)
 	hdfswriter.EXPECT().Close().Return(nil)
 	writeHandle, err := NewFileHandleWriter(h.(*FileHandle), true)
 	assert.Nil(t, err)
@@ -92,7 +93,7 @@ func TestFaultTolerantWriteFile(t *testing.T) {
 	assert.Equal(t, writeHandle.BytesWritten, uint64(11))
 
 	hdfsAccessor.EXPECT().Remove("/testWriteFile_1").Return(nil)
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757)).Return(hdfswriter, nil)
+	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil)
 	// hdfswriter.EXPECT().Close().Return(nil)
 	binaryData := make([]byte, 65536, 65536)
 	nr, _ := writeHandle.stagingFile.Read(binaryData)
@@ -110,7 +111,7 @@ func TestFaultTolerantWriteFile(t *testing.T) {
 	newhdfswriter := NewMockHdfsWriter(mockCtrl)
 	hdfsAccessor.EXPECT().StatFs().Return(FsInfo{capacity: uint64(100), used: uint64(20), remaining: uint64(80)}, nil)
 	hdfsAccessor.EXPECT().Remove(fileName).Return(nil)
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757)).Return(newhdfswriter, nil)
+	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(newhdfswriter, nil)
 	newbinaryData := make([]byte, 65536, 65536)
 	newnr, _ := writeHandle.stagingFile.Read(binaryData)
 	newbinaryData = newbinaryData[:newnr]
@@ -137,14 +138,14 @@ func TestFlushFile(t *testing.T) {
 
 	hdfswriter := NewMockHdfsWriter(mockCtrl)
 	hdfsAccessor.EXPECT().Remove(fileName).Return(nil)
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757)).Return(hdfswriter, nil)
+	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil)
 	hdfswriter.EXPECT().Close().Return(nil)
 
 	root, _ := fs.Root()
 	_, h, _ := root.(*Dir).Create(nil, &fuse.CreateRequest{Name: fileName, Mode: os.FileMode(0757)}, &fuse.CreateResponse{})
 
 	// Test for newfilehandlewriter with existing file
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757)).Return(hdfswriter, nil)
+	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil)
 	hdfswriter.EXPECT().Close().Return(nil)
 	hdfsAccessor.EXPECT().StatFs().Return(FsInfo{capacity: uint64(100), used: uint64(20), remaining: uint64(80)}, nil)
 	hdfsAccessor.EXPECT().Stat("/testWriteFile_2").Return(Attrs{Name: "testWriteFile_2"}, nil)

@@ -13,6 +13,7 @@ import (
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
+	logger "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 )
 
@@ -131,13 +132,14 @@ func (dir *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 // Responds on FUSE request to read directory
 func (dir *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	absolutePath := dir.AbsolutePath()
-	Info.Println("[", absolutePath, "]ReadDirAll")
+	logger.WithFields(logger.Fields{Operation: ReadDir, Path: absolutePath}).Info("Reading")
 
 	allAttrs, err := dir.FileSystem.HdfsAccessor.ReadDir(absolutePath)
 	if err != nil {
-		Warning.Println("ls [", absolutePath, "]: ", err)
+		logger.WithFields(logger.Fields{Operation: ReadDir, Path: absolutePath, Error: err}).Warn("Failed to list DFS directory")
 		return nil, err
 	}
+
 	entries := make([]fuse.Dirent, 0, len(allAttrs))
 	for _, a := range allAttrs {
 		if dir.FileSystem.IsPathAllowed(dir.AbsolutePathForChild(a.Name)) {
@@ -183,7 +185,7 @@ func (dir *Dir) LookupAttrs(name string, attrs *Attrs) error {
 	*attrs, err = dir.FileSystem.HdfsAccessor.Stat(path.Join(dir.AbsolutePath(), name))
 	if err != nil {
 		// It is a warning as each time new file write tries to stat if the file exists
-		Warning.Print("stat [", name, "]: ", err.Error(), err)
+		logger.WithFields(logger.Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name)}).Warn("Stat failed")
 		if pathError, ok := err.(*os.PathError); ok && (pathError.Err == os.ErrNotExist) {
 			return fuse.ENOENT
 		}
@@ -205,11 +207,12 @@ func (dir *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, err
 
 // Responds on FUSE Create request
 func (dir *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
-	Info.Printf("Create %s,  mode: %v, flags: %v  ", dir.AbsolutePathForChild(req.Name), req.Mode, req.Flags)
+	logger.WithFields(logger.Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags}).Info("Creating file")
+
 	file := dir.NodeFromAttrs(Attrs{Name: req.Name, Mode: req.Mode}).(*File)
 	handle, err := NewFileHandle(file, false, req.Flags)
 	if err != nil {
-		Error.Println("Can't create file: ", dir.AbsolutePathForChild(req.Name), err)
+		logger.WithFields(logger.Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags, Error: err}).Error("File creation failed")
 		return nil, nil, err
 	}
 	file.AddHandle(handle)
@@ -219,10 +222,12 @@ func (dir *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.
 // Responds on FUSE Remove request
 func (dir *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 	path := dir.AbsolutePathForChild(req.Name)
-	Info.Println("Remove", path)
+	logger.WithFields(logger.Fields{Operation: Remove, Path: path}).Info("Removing path")
 	err := dir.FileSystem.HdfsAccessor.Remove(path)
 	if err == nil {
 		dir.EntriesRemove(req.Name)
+	} else {
+		logger.WithFields(logger.Fields{Operation: Remove, Path: path, Error: err}).Error("Failed to remove path")
 	}
 	return err
 }
@@ -231,7 +236,7 @@ func (dir *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 func (dir *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.Node) error {
 	oldPath := dir.AbsolutePathForChild(req.OldName)
 	newPath := newDir.(*Dir).AbsolutePathForChild(req.NewName)
-	Info.Println("Rename [", oldPath, "] to ", newPath)
+	logger.WithFields(logger.Fields{Operation: Rename, Path: oldPath}).Infof("Renaming to %s ", newPath)
 	err := dir.FileSystem.HdfsAccessor.Rename(oldPath, newPath)
 	if err == nil {
 		// Upon successful rename, updating in-memory representation of the file entry
@@ -255,7 +260,8 @@ func (dir *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fus
 	var err error
 
 	if req.Valid.Mode() {
-		Info.Println("Chmod [", path, "] to [", req.Mode, "]")
+
+		logger.WithFields(logger.Fields{Operation: Chmod, Path: path, Mode: req.Mode}).Info("Setting attributes")
 		(func() {
 			err = dir.FileSystem.HdfsAccessor.Chmod(path, req.Mode)
 			if err != nil {
@@ -264,7 +270,8 @@ func (dir *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fus
 		})()
 
 		if err != nil {
-			Error.Println("Chmod [", path, "] failed with error: ", err)
+			logger.WithFields(logger.Fields{Operation: Chmod, Path: path, Mode: req.Mode, Error: err}).
+				Error("Failed to set attributes")
 		} else {
 			dir.Attrs.Mode = req.Mode
 		}
@@ -275,22 +282,26 @@ func (dir *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fus
 		owner := fmt.Sprint(req.Uid)
 		group := fmt.Sprint(req.Gid)
 		if err != nil {
-			Error.Println("Chown: username for uid", req.Uid, "not found, use uid/gid instead")
+			logger.WithFields(logger.Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err}).
+				Error("Chown: username for uid", req.Uid, "not found, use uid/gid instead")
 		} else {
 			owner = u.Username
 			group = owner // hardcoded the group same as owner until LookupGroupId available
 		}
 
-		Info.Println("Chown [", path, "] to [", owner, ":", group, "]")
+		logger.WithFields(logger.Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group}).Info("Chown")
 		(func() {
 			err = dir.FileSystem.HdfsAccessor.Chown(path, owner, group)
 			if err != nil {
+				logger.WithFields(logger.Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err}).
+					Error("Chown failed on DFS")
 				return
 			}
 		})()
 
 		if err != nil {
-			Error.Println("Chown failed with error:", err)
+			logger.WithFields(logger.Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err}).
+				Error("Chown failed")
 		} else {
 			dir.Attrs.Uid = req.Uid
 			dir.Attrs.Gid = req.Gid

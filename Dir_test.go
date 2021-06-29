@@ -10,13 +10,15 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	logger "github.com/sirupsen/logrus"
 )
 
 // Testing whether attributes are cached
 func TestAttributeCaching(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockClock := &MockClock{}
-	InitLogger(os.Stdout, os.Stdout, os.Stdout, os.Stderr)
+	initLogger(logger.TraceLevel.String(), os.Stdout)
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
 	fs, _ := NewFileSystem(hdfsAccessor, "/tmp/x", []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
 	root, _ := fs.Root()

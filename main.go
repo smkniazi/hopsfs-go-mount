@@ -14,8 +14,6 @@ import (
 
 	"bazil.org/fuse/fs"
 	_ "bazil.org/fuse/fs/fstestutil"
-
-	logger "github.com/sirupsen/logrus"
 )
 
 var Usage = func() {
@@ -95,7 +93,7 @@ func main() {
 		Max: 1024 * 1024}
 	err = syscall.Setrlimit(syscall.RLIMIT_NOFILE, &rLimit)
 	if err != nil {
-		logger.Errorf("Failed to update the maximum number of file descriptors from 1K to 1M, %v", err)
+		errorlog(fmt.Sprintf("Failed to update the maximum number of file descriptors from 1K to 1M, %v", err), Fields{})
 	}
 
 	defer func() {
@@ -130,6 +128,6 @@ func main() {
 
 func createStagingDir() {
 	if err := os.MkdirAll(stagingDir, 0700); err != nil {
-		logger.Errorf("Failed to create stageDir: %s. Error: %v", stagingDir, err)
+		errorlog(fmt.Sprintf("Failed to create stageDir: %s. Error: %v", stagingDir, err), Fields{})
 	}
 }

@@ -3,10 +3,9 @@
 package main
 
 import (
+	"fmt"
 	"math/rand"
 	"time"
-
-	logger "github.com/sirupsen/logrus"
 )
 
 // Encapsulats policy and logic of handling retries
@@ -68,7 +67,7 @@ func (op *Op) ShouldRetry(message string, args ...interface{}) bool {
 		diag = "exceeded max configured time interval for retries"
 	}
 	if diag != "" {
-		logger.WithFields(logger.Fields{Operation: RetryingPolicy, Message: message, Retries: op.Attempt, Diag: diag}).Error("Failed all retries. ", args)
+		errorlog(fmt.Sprintf("Failed all retries. %v ", args), Fields{Operation: RetryingPolicy, Message: message, Retries: op.Attempt, Diag: diag})
 		return false
 	}
 	// Computing delay (exponential backoff)
@@ -87,7 +86,7 @@ func (op *Op) ShouldRetry(message string, args ...interface{}) bool {
 	}
 
 	// Logging information about failed attempt
-	logger.WithFields(logger.Fields{Operation: RetryingPolicy, Message: message, Retries: op.Attempt, Delay: effectiveDelay}).Warn("Failed try. Retrying ", args)
+	warnlog(fmt.Sprintf("Failed try. Retrying %v", args), Fields{Operation: RetryingPolicy, Message: message, Retries: op.Attempt, Delay: effectiveDelay})
 	op.Attempt++
 
 	// Sleeping

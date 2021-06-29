@@ -5,6 +5,7 @@ package main
 import (
 	"io"
 
+	nested "github.com/antonfisher/nested-logrus-formatter"
 	logger "github.com/sirupsen/logrus"
 )
 
@@ -48,6 +49,7 @@ const (
 	Retries        = "retries"
 	Diag           = "diag"
 	Delay          = "delay"
+	Entries        = "entries"
 )
 
 func initLogger(l string, out io.Writer) {
@@ -57,14 +59,44 @@ func initLogger(l string, out io.Writer) {
 		lvl = logger.WarnLevel
 	}
 
-	// Log as JSON instead of the default ASCII formatter.
-	// Logger.SetFormatter(&logrus.JSONFormatter{})
-
 	// Output to stdout instead of the default stderr
 	// Can be any io.Writer, see below for File example
 	// TODO log to file and log cutting
 	logger.SetOutput(out)
 
+	//set formatter
+	logger.SetFormatter(&nested.Formatter{
+		HideKeys:       false,
+		NoFieldsColors: true,
+		FieldsOrder:    []string{Operation, Path},
+	})
+
 	// Only log the warning severity or above.
 	logger.SetLevel(lvl)
+}
+
+type Fields logger.Fields
+
+func tracelog(msg string, f Fields) {
+	logger.WithFields(logger.Fields(f)).Trace(msg)
+}
+
+func debuglog(msg string, f Fields) {
+	logger.WithFields(logger.Fields(f)).Debug(msg)
+}
+
+func infolog(msg string, f Fields) {
+	logger.WithFields(logger.Fields(f)).Info(msg)
+}
+
+func warnlog(msg string, f Fields) {
+	logger.WithFields(logger.Fields(f)).Warn(msg)
+}
+
+func errorlog(msg string, f Fields) {
+	logger.WithFields(logger.Fields(f)).Error(msg)
+}
+
+func paniclog(msg string, f Fields) {
+	logger.WithFields(logger.Fields(f)).Panic(msg)
 }

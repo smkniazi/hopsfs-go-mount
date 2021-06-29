@@ -13,7 +13,6 @@ import (
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
-	logger "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 )
 
@@ -132,11 +131,11 @@ func (dir *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 // Responds on FUSE request to read directory
 func (dir *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	absolutePath := dir.AbsolutePath()
-	logger.WithFields(logger.Fields{Operation: ReadDir, Path: absolutePath}).Info("Reading")
+	infolog("Read directory", Fields{Operation: ReadDir, Path: absolutePath})
 
 	allAttrs, err := dir.FileSystem.HdfsAccessor.ReadDir(absolutePath)
 	if err != nil {
-		logger.WithFields(logger.Fields{Operation: ReadDir, Path: absolutePath, Error: err}).Warn("Failed to list DFS directory")
+		warnlog("Failed to list DFS directory", Fields{Operation: ReadDir, Path: absolutePath, Error: err})
 		return nil, err
 	}
 
@@ -185,7 +184,7 @@ func (dir *Dir) LookupAttrs(name string, attrs *Attrs) error {
 	*attrs, err = dir.FileSystem.HdfsAccessor.Stat(path.Join(dir.AbsolutePath(), name))
 	if err != nil {
 		// It is a warning as each time new file write tries to stat if the file exists
-		logger.WithFields(logger.Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name)}).Warn("Stat failed")
+		warnlog("Stat failed", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name)})
 		if pathError, ok := err.(*os.PathError); ok && (pathError.Err == os.ErrNotExist) {
 			return fuse.ENOENT
 		}
@@ -207,12 +206,12 @@ func (dir *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, err
 
 // Responds on FUSE Create request
 func (dir *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
-	logger.WithFields(logger.Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags}).Info("Creating file")
+	infolog("Creating a new file", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags})
 
 	file := dir.NodeFromAttrs(Attrs{Name: req.Name, Mode: req.Mode}).(*File)
 	handle, err := NewFileHandle(file, false, req.Flags)
 	if err != nil {
-		logger.WithFields(logger.Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags, Error: err}).Error("File creation failed")
+		errorlog("File creation failed", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags, Error: err})
 		return nil, nil, err
 	}
 	file.AddHandle(handle)
@@ -222,12 +221,12 @@ func (dir *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.
 // Responds on FUSE Remove request
 func (dir *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 	path := dir.AbsolutePathForChild(req.Name)
-	logger.WithFields(logger.Fields{Operation: Remove, Path: path}).Info("Removing path")
+	infolog("Removing path", Fields{Operation: Remove, Path: path})
 	err := dir.FileSystem.HdfsAccessor.Remove(path)
 	if err == nil {
 		dir.EntriesRemove(req.Name)
 	} else {
-		logger.WithFields(logger.Fields{Operation: Remove, Path: path, Error: err}).Error("Failed to remove path")
+		errorlog("Failed to remove path", Fields{Operation: Remove, Path: path, Error: err})
 	}
 	return err
 }
@@ -236,7 +235,7 @@ func (dir *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 func (dir *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.Node) error {
 	oldPath := dir.AbsolutePathForChild(req.OldName)
 	newPath := newDir.(*Dir).AbsolutePathForChild(req.NewName)
-	logger.WithFields(logger.Fields{Operation: Rename, Path: oldPath}).Infof("Renaming to %s ", newPath)
+	infolog("Renaming to "+newPath, Fields{Operation: Rename, Path: oldPath})
 	err := dir.FileSystem.HdfsAccessor.Rename(oldPath, newPath)
 	if err == nil {
 		// Upon successful rename, updating in-memory representation of the file entry
@@ -260,8 +259,7 @@ func (dir *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fus
 	var err error
 
 	if req.Valid.Mode() {
-
-		logger.WithFields(logger.Fields{Operation: Chmod, Path: path, Mode: req.Mode}).Info("Setting attributes")
+		infolog("Setting attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode})
 		(func() {
 			err = dir.FileSystem.HdfsAccessor.Chmod(path, req.Mode)
 			if err != nil {
@@ -270,8 +268,7 @@ func (dir *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fus
 		})()
 
 		if err != nil {
-			logger.WithFields(logger.Fields{Operation: Chmod, Path: path, Mode: req.Mode, Error: err}).
-				Error("Failed to set attributes")
+			errorlog("Failed to set attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode, Error: err})
 		} else {
 			dir.Attrs.Mode = req.Mode
 		}
@@ -282,26 +279,23 @@ func (dir *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fus
 		owner := fmt.Sprint(req.Uid)
 		group := fmt.Sprint(req.Gid)
 		if err != nil {
-			logger.WithFields(logger.Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err}).
-				Error("Chown: username for uid", req.Uid, "not found, use uid/gid instead")
+			errorlog(fmt.Sprintf("Chown: username for uid %d not found, use uid/gid instead", req.Uid),
+				Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
 		} else {
 			owner = u.Username
 			group = owner // hardcoded the group same as owner until LookupGroupId available
 		}
 
-		logger.WithFields(logger.Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group}).Info("Chown")
+		infolog("Setting attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group})
 		(func() {
 			err = dir.FileSystem.HdfsAccessor.Chown(path, owner, group)
 			if err != nil {
-				logger.WithFields(logger.Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err}).
-					Error("Chown failed on DFS")
 				return
 			}
 		})()
 
 		if err != nil {
-			logger.WithFields(logger.Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err}).
-				Error("Chown failed")
+			errorlog("Failed to set attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
 		} else {
 			dir.Attrs.Uid = req.Uid
 			dir.Attrs.Gid = req.Gid

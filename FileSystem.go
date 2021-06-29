@@ -6,7 +6,6 @@ import (
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 
-	logger "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 
 	"io"
@@ -136,7 +135,7 @@ func (filesystem *FileSystem) CloseOnUnmount(file io.Closer) {
 func (filesystem *FileSystem) Statfs(ctx context.Context, req *fuse.StatfsRequest, resp *fuse.StatfsResponse) error {
 	fsInfo, err := filesystem.HdfsAccessor.StatFs()
 	if err != nil {
-		logger.WithFields(logger.Fields{Operation: StatFS, Error: err}).Warn("Stat DFS failed")
+		warnlog("Stat DFS failed", Fields{Operation: StatFS, Error: err})
 		return err
 	}
 	resp.Bsize = 1024

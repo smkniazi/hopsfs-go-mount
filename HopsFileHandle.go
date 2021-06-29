@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
@@ -11,7 +12,6 @@ import (
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
-	logger "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 )
 
@@ -44,7 +44,7 @@ func (fh *FileHandle) createStagingFile(operation string, existsInDFS bool) erro
 	if !existsInDFS { // it  is a new file so create it in the DFS
 		w, err := hdfsAccessor.CreateFile(absPath, fh.File.Attrs.Mode, false)
 		if err != nil {
-			logger.WithFields(logger.Fields{Operation: operation, Path: absPath, Error: err}).Error("Failed to create file in DFS")
+			errorlog("Failed to create file in DFS", Fields{Operation: operation, Path: absPath, Error: err})
 			return err
 		}
 		w.Close()
@@ -52,51 +52,49 @@ func (fh *FileHandle) createStagingFile(operation string, existsInDFS bool) erro
 		// Request to write to existing file
 		_, err := hdfsAccessor.Stat(absPath)
 		if err != nil {
-			logger.WithFields(logger.Fields{Operation: operation, Path: absPath, Error: err}).Error("Failed to stat file in DFS")
+			errorlog("Failed to stat file in DFS", Fields{Operation: operation, Path: absPath, Error: err})
 			return &os.PathError{Op: operation, Path: absPath, Err: os.ErrNotExist}
 		}
 	}
 
 	stagingFile, err := ioutil.TempFile(stagingDir, "stage")
 	if err != nil {
-		logger.WithFields(logger.Fields{Operation: operation, Path: absPath, Error: err}).Error("Failed to create staging file")
+		errorlog("Failed to create staging file", Fields{Operation: operation, Path: absPath, Error: err})
 		return err
 	}
 	defer stagingFile.Close()
-	logger.WithFields(logger.Fields{Operation: operation, Path: absPath, TmpFile: stagingFile.Name()}).Info("Created staging file ")
-
 	fh.File.tmpFile = stagingFile.Name()
+	infolog("Created staging file", Fields{Operation: operation, Path: absPath, TmpFile: stagingFile.Name()})
 	return nil
 }
 
 func (fh *FileHandle) downloadToStaging(operation string) error {
-	logger.WithFields(logger.Fields{Operation: operation, Path: fh.File.AbsolutePath()}).Debug("Downloading a copy to stating dir")
 	hdfsAccessor := fh.File.FileSystem.HdfsAccessor
 	absPath := fh.File.AbsolutePath()
 
 	reader, err := hdfsAccessor.OpenRead(absPath)
 	if err != nil {
-		logger.WithFields(logger.Fields{Operation: operation, Path: absPath, Error: err}).Error("Failed to open file in DFS")
+		errorlog("Failed to open file in DFS", Fields{Operation: operation, Path: absPath, Error: err})
 		// TODO remove the staging file if there are no more active handles
 		return &os.PathError{Op: operation, Path: absPath, Err: err}
 	}
 
 	tmpFileHandle, err := os.OpenFile(fh.File.tmpFile, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
-		logger.WithFields(logger.Fields{Operation: operation, Path: absPath, TmpFile: fh.File.tmpFile, Error: err}).Error("Failed to open staging file")
+		errorlog("Failed to open staging file", Fields{Operation: operation, Path: absPath, TmpFile: fh.File.tmpFile, Error: err})
 		return &os.PathError{Op: operation, Path: absPath, Err: err}
 	}
 
 	nc, err := io.Copy(tmpFileHandle, reader)
 	if err != nil {
-		logger.WithFields(logger.Fields{Operation: operation, Path: absPath, TmpFile: fh.File.tmpFile, Error: err}).Error("Failed to copy content to staging file")
+		errorlog("Failed to copy content to staging file", Fields{Operation: operation, Path: absPath, TmpFile: fh.File.tmpFile, Error: err})
 		tmpFileHandle.Close()
 		// TODO remote the statging file.
 		return &os.PathError{Op: operation, Path: absPath, Err: err}
 	}
 	reader.Close()
 	tmpFileHandle.Close()
-	logger.WithFields(logger.Fields{Operation: operation, Path: fh.File.AbsolutePath()}).Infof("Downloaded a copy to stating dir. %d bytes copied", nc)
+	debuglog(fmt.Sprintf("Downloaded a copy to stating dir. %d bytes copied", nc), Fields{Operation: operation, Path: fh.File.AbsolutePath()})
 	return nil
 }
 
@@ -133,7 +131,7 @@ func NewFileHandle(file *File, existsInDFS bool, flags fuse.OpenFlags) (*FileHan
 	}
 
 	if truncateContent {
-		logger.WithFields(logger.Fields{Operation: operation, Path: fh.File.AbsolutePath()}).Info("Truncate file to 0")
+		infolog("Truncate file to 0", Fields{Operation: operation, Path: fh.File.AbsolutePath()})
 		os.Truncate(fh.File.tmpFile, 0)
 	}
 
@@ -185,14 +183,14 @@ func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fus
 	if err != nil {
 		if err == io.EOF {
 			// EOF isn't a error, reporting successful read to FUSE
-			logger.WithFields(logger.Fields{Operation: Read, Path: fh.File.AbsolutePath(), Bytes: nr}).Info("Finished reading from staging file")
+			debuglog("Finished reading from staging file. EOF", Fields{Operation: Read, Path: fh.File.AbsolutePath(), Bytes: nr})
 			return nil
 		} else {
-			logger.WithFields(logger.Fields{Operation: Read, Path: fh.File.AbsolutePath(), Error: err, Bytes: nr}).Error("Failed to read from staging file")
+			errorlog("Failed to read from staging file", Fields{Operation: Read, Path: fh.File.AbsolutePath(), Error: err, Bytes: nr})
 			return err
 		}
 	}
-	logger.WithFields(logger.Fields{Operation: Read, Path: fh.File.AbsolutePath(), Bytes: nr}).Info("Read from staging file")
+	debuglog("Read from staging file", Fields{Operation: Read, Path: fh.File.AbsolutePath(), Bytes: nr})
 	return err
 }
 
@@ -212,10 +210,10 @@ func (fh *FileHandle) Write(ctx context.Context, req *fuse.WriteRequest, resp *f
 	// }
 	resp.Size = nw
 	if err != nil {
-		logger.WithFields(logger.Fields{Operation: Write, Path: fh.File.AbsolutePath(), Error: err}).Warn("Failed to write to staging file")
+		errorlog("Failed to write to staging file", Fields{Operation: Write, Path: fh.File.AbsolutePath(), Error: err})
 		return err
 	} else {
-		logger.WithFields(logger.Fields{Operation: Write, Path: fh.File.AbsolutePath(), Bytes: nw}).Info("Write to staging file")
+		debuglog("Write data to staging file", Fields{Operation: Write, Path: fh.File.AbsolutePath(), Bytes: nw})
 		return nil
 	}
 }
@@ -232,7 +230,7 @@ func (fh *FileHandle) copyToDFS(operation string) error {
 	}
 	defer fh.File.InvalidateMetadataCache()
 
-	logger.WithFields(logger.Fields{Operation: Write, Path: fh.File.AbsolutePath(), Bytes: size}).Info("Uploading to DFS")
+	debuglog("Uploading to DFS", Fields{Operation: Write, Path: fh.File.AbsolutePath(), Bytes: size})
 
 	op := fh.File.FileSystem.RetryPolicy.StartOperation()
 	for {
@@ -242,7 +240,7 @@ func (fh *FileHandle) copyToDFS(operation string) error {
 		}
 		// Restart a new connection, https://github.com/colinmarc/hdfs/issues/86
 		fh.File.FileSystem.HdfsAccessor.Close()
-		logger.WithFields(logger.Fields{Operation: operation, Path: fh.File.AbsolutePath()}).Warn("Failed to copy file to DFS")
+		warnlog("Failed to copy file to DFS", Fields{Operation: operation, Path: fh.File.AbsolutePath()})
 		// Wait for 30 seconds before another retry to get another set of datanodes.
 		// https://community.hortonworks.com/questions/2474/how-to-identify-stale-datanode.html
 		time.Sleep(30 * time.Second)
@@ -254,18 +252,17 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 	hdfsAccessor := fh.File.FileSystem.HdfsAccessor
 	w, err := hdfsAccessor.CreateFile(fh.File.AbsolutePath(), fh.File.Attrs.Mode, true)
 	if err != nil {
-		logger.WithFields(logger.Fields{Operation: operation, Path: fh.File.AbsolutePath(), Error: err}).Warn("Error creating file in DFS")
+		errorlog("Error creating file in DFS", Fields{Operation: operation, Path: fh.File.AbsolutePath(), Error: err})
 		return err
 	}
 
 	//open the file for reading and upload to DFS
 	in, err := os.Open(fh.File.tmpFile)
-	defer in.Close()
-
 	if err != nil {
-		logger.WithFields(logger.Fields{Operation: operation, Path: fh.File.AbsolutePath(), TmpFile: fh.File.tmpFile, Error: err}).Warn("Failed to open staging file")
+		errorlog("Failed to open staging file", Fields{Operation: operation, Path: fh.File.AbsolutePath(), TmpFile: fh.File.tmpFile, Error: err})
 		return &os.PathError{Op: operation, Path: fh.File.AbsolutePath(), Err: err}
 	}
+	defer in.Close()
 
 	b := make([]byte, 65536)
 	written := 0
@@ -273,7 +270,7 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 		nr, err := in.Read(b)
 		if err != nil {
 			if err != io.EOF {
-				logger.WithFields(logger.Fields{Operation: operation, Path: fh.File.AbsolutePath(), Error: err}).Warn("Failed to read from staging file")
+				errorlog("Failed to read from staging file", Fields{Operation: operation, Path: fh.File.AbsolutePath(), Error: err})
 			}
 			break
 		}
@@ -281,20 +278,20 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 
 		nw, err := w.Write(b)
 		if err != nil {
-			logger.WithFields(logger.Fields{Operation: operation, Path: fh.File.AbsolutePath(), Error: err}).Warn("Failed to write to DFS")
+			errorlog("Failed to write to DFS", Fields{Operation: operation, Path: fh.File.AbsolutePath(), Error: err})
 			w.Close()
 			return err
 		}
-		logger.WithFields(logger.Fields{Operation: operation, Path: fh.File.AbsolutePath(), Bytes: nw}).Trace("Written to DFS")
+		tracelog("Written to DFS", Fields{Operation: operation, Path: fh.File.AbsolutePath(), Bytes: nw})
 		written += nw
 	}
 
 	err = w.Close()
 	if err != nil {
-		logger.WithFields(logger.Fields{Operation: operation, Path: fh.File.AbsolutePath(), Error: err}).Warn("Failed to close file in DFS")
+		errorlog("Failed to close file in DFS", Fields{Operation: operation, Path: fh.File.AbsolutePath(), Error: err})
 		return err
 	}
-	logger.WithFields(logger.Fields{Operation: operation, Path: fh.File.AbsolutePath(), Bytes: written}).Info("Completed copying to DFS")
+	infolog("Uploaded to DFS", Fields{Operation: operation, Path: fh.File.AbsolutePath(), Bytes: written})
 	return nil
 }
 
@@ -302,7 +299,7 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 func (fh *FileHandle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 	fh.Mutex.Lock()
 	defer fh.Mutex.Unlock()
-	logger.WithFields(logger.Fields{Operation: Flush, Path: fh.File.AbsolutePath()}).Info("Flush file")
+	infolog("Flush file", Fields{Operation: Flush, Path: fh.File.AbsolutePath()})
 	return fh.copyToDFS(Flush)
 }
 
@@ -310,7 +307,7 @@ func (fh *FileHandle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 func (fh *FileHandle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
 	fh.Mutex.Lock()
 	defer fh.Mutex.Unlock()
-	logger.WithFields(logger.Fields{Operation: Fsync, Path: fh.File.AbsolutePath()}).Info("Fsync file")
+	infolog("Fsync file", Fields{Operation: Fsync, Path: fh.File.AbsolutePath()})
 	return fh.copyToDFS(Fsync)
 }
 
@@ -321,11 +318,11 @@ func (fh *FileHandle) Release(ctx context.Context, req *fuse.ReleaseRequest) err
 	err := fh.handle.Close()
 
 	if err != nil {
-		logger.WithFields(logger.Fields{Operation: Close, Path: fh.File.AbsolutePath(), Error: err}).Warn("Failed to close staging file")
+		errorlog("Failed to close staging file", Fields{Operation: Close, Path: fh.File.AbsolutePath(), Error: err})
 	}
 	fh.handle = nil
 	fh.File.InvalidateMetadataCache()
 	fh.File.RemoveHandle(fh)
-	logger.WithFields(logger.Fields{Operation: Close, Path: fh.File.AbsolutePath()}).Warn("Close file")
+	infolog("Close file", Fields{Operation: Close, Path: fh.File.AbsolutePath()})
 	return err
 }

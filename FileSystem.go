@@ -135,7 +135,7 @@ func (filesystem *FileSystem) CloseOnUnmount(file io.Closer) {
 func (filesystem *FileSystem) Statfs(ctx context.Context, req *fuse.StatfsRequest, resp *fuse.StatfsResponse) error {
 	fsInfo, err := filesystem.HdfsAccessor.StatFs()
 	if err != nil {
-		warnlog("Stat DFS failed", Fields{Operation: StatFS, Error: err})
+		logwarn("Stat DFS failed", Fields{Operation: StatFS, Error: err})
 		return err
 	}
 	resp.Bsize = 1024

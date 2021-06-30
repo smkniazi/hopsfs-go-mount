@@ -54,7 +54,7 @@ func (file *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Op
 	file.activeHandlesMutex.Lock()
 	defer file.activeHandlesMutex.Unlock()
 
-	debuglog("Opening file", Fields{Operation: Open, Path: file.AbsolutePath(), Flags: req.Flags})
+	logdebug("Opening file", Fields{Operation: Open, Path: file.AbsolutePath(), Flags: req.Flags})
 	handle, err := NewFileHandle(file, true, req.Flags)
 	if err != nil {
 		return nil, err
@@ -66,7 +66,7 @@ func (file *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Op
 
 // Opens file for reading
 func (file *File) OpenRead() (ReadSeekCloser, error) {
-	paniclog("Unsupported operation", Fields{Operation: Open, Path: file.AbsolutePath()})
+	logpanic("Unsupported operation", Fields{Operation: Open, Path: file.AbsolutePath()})
 	return nil, nil
 }
 
@@ -97,7 +97,7 @@ func (file *File) GetActiveHandles() []*FileHandle {
 
 // Responds to the FUSE Fsync request
 func (file *File) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
-	infolog(fmt.Sprintf("Dispatching fsync request to all open handles: %d", len(file.GetActiveHandles())), Fields{Operation: Fsync})
+	loginfo(fmt.Sprintf("Dispatching fsync request to all open handles: %d", len(file.GetActiveHandles())), Fields{Operation: Fsync})
 	var retErr error
 	for _, handle := range file.GetActiveHandles() {
 		err := handle.Fsync(ctx, req)
@@ -134,7 +134,7 @@ func (file *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *f
 	var err error
 
 	if req.Valid.Mode() {
-		infolog("Setting attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode})
+		loginfo("Setting attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode})
 		(func() {
 			err = file.FileSystem.HdfsAccessor.Chmod(path, req.Mode)
 			if err != nil {
@@ -143,7 +143,7 @@ func (file *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *f
 		})()
 
 		if err != nil {
-			errorlog("Failed to set attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode, Error: err})
+			logerror("Failed to set attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode, Error: err})
 		} else {
 			file.Attrs.Mode = req.Mode
 		}
@@ -154,14 +154,14 @@ func (file *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *f
 		owner := fmt.Sprint(req.Uid)
 		group := fmt.Sprint(req.Gid)
 		if err != nil {
-			errorlog(fmt.Sprintf("Chown: username for uid %d not found, use uid/gid instead", req.Uid),
+			logerror(fmt.Sprintf("Chown: username for uid %d not found, use uid/gid instead", req.Uid),
 				Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
 		} else {
 			owner = u.Username
 			group = owner // hardcoded the group same as owner
 		}
 
-		infolog("Setting attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group})
+		loginfo("Setting attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group})
 		(func() {
 			err = file.FileSystem.HdfsAccessor.Chown(path, fmt.Sprint(req.Uid), fmt.Sprint(req.Gid))
 			if err != nil {
@@ -170,7 +170,7 @@ func (file *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *f
 		})()
 
 		if err != nil {
-			errorlog("Failed to set attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
+			logerror("Failed to set attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
 		} else {
 			file.Attrs.Uid = req.Uid
 			file.Attrs.Gid = req.Gid

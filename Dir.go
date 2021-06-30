@@ -131,11 +131,11 @@ func (dir *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 // Responds on FUSE request to read directory
 func (dir *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	absolutePath := dir.AbsolutePath()
-	infolog("Read directory", Fields{Operation: ReadDir, Path: absolutePath})
+	loginfo("Read directory", Fields{Operation: ReadDir, Path: absolutePath})
 
 	allAttrs, err := dir.FileSystem.HdfsAccessor.ReadDir(absolutePath)
 	if err != nil {
-		warnlog("Failed to list DFS directory", Fields{Operation: ReadDir, Path: absolutePath, Error: err})
+		logwarn("Failed to list DFS directory", Fields{Operation: ReadDir, Path: absolutePath, Error: err})
 		return nil, err
 	}
 
@@ -184,7 +184,7 @@ func (dir *Dir) LookupAttrs(name string, attrs *Attrs) error {
 	*attrs, err = dir.FileSystem.HdfsAccessor.Stat(path.Join(dir.AbsolutePath(), name))
 	if err != nil {
 		// It is a warning as each time new file write tries to stat if the file exists
-		warnlog("Stat failed", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name)})
+		logwarn("Stat failed", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name)})
 		if pathError, ok := err.(*os.PathError); ok && (pathError.Err == os.ErrNotExist) {
 			return fuse.ENOENT
 		}
@@ -206,12 +206,12 @@ func (dir *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, err
 
 // Responds on FUSE Create request
 func (dir *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
-	infolog("Creating a new file", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags})
+	loginfo("Creating a new file", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags})
 
 	file := dir.NodeFromAttrs(Attrs{Name: req.Name, Mode: req.Mode}).(*File)
 	handle, err := NewFileHandle(file, false, req.Flags)
 	if err != nil {
-		errorlog("File creation failed", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags, Error: err})
+		logerror("File creation failed", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags, Error: err})
 		return nil, nil, err
 	}
 	file.AddHandle(handle)
@@ -221,12 +221,12 @@ func (dir *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.
 // Responds on FUSE Remove request
 func (dir *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 	path := dir.AbsolutePathForChild(req.Name)
-	infolog("Removing path", Fields{Operation: Remove, Path: path})
+	loginfo("Removing path", Fields{Operation: Remove, Path: path})
 	err := dir.FileSystem.HdfsAccessor.Remove(path)
 	if err == nil {
 		dir.EntriesRemove(req.Name)
 	} else {
-		errorlog("Failed to remove path", Fields{Operation: Remove, Path: path, Error: err})
+		logerror("Failed to remove path", Fields{Operation: Remove, Path: path, Error: err})
 	}
 	return err
 }
@@ -235,7 +235,7 @@ func (dir *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 func (dir *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.Node) error {
 	oldPath := dir.AbsolutePathForChild(req.OldName)
 	newPath := newDir.(*Dir).AbsolutePathForChild(req.NewName)
-	infolog("Renaming to "+newPath, Fields{Operation: Rename, Path: oldPath})
+	loginfo("Renaming to "+newPath, Fields{Operation: Rename, Path: oldPath})
 	err := dir.FileSystem.HdfsAccessor.Rename(oldPath, newPath)
 	if err == nil {
 		// Upon successful rename, updating in-memory representation of the file entry
@@ -259,7 +259,7 @@ func (dir *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fus
 	var err error
 
 	if req.Valid.Mode() {
-		infolog("Setting attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode})
+		loginfo("Setting attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode})
 		(func() {
 			err = dir.FileSystem.HdfsAccessor.Chmod(path, req.Mode)
 			if err != nil {
@@ -268,7 +268,7 @@ func (dir *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fus
 		})()
 
 		if err != nil {
-			errorlog("Failed to set attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode, Error: err})
+			logerror("Failed to set attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode, Error: err})
 		} else {
 			dir.Attrs.Mode = req.Mode
 		}
@@ -279,14 +279,14 @@ func (dir *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fus
 		owner := fmt.Sprint(req.Uid)
 		group := fmt.Sprint(req.Gid)
 		if err != nil {
-			errorlog(fmt.Sprintf("Chown: username for uid %d not found, use uid/gid instead", req.Uid),
+			logerror(fmt.Sprintf("Chown: username for uid %d not found, use uid/gid instead", req.Uid),
 				Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
 		} else {
 			owner = u.Username
 			group = owner // hardcoded the group same as owner until LookupGroupId available
 		}
 
-		infolog("Setting attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group})
+		loginfo("Setting attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group})
 		(func() {
 			err = dir.FileSystem.HdfsAccessor.Chown(path, owner, group)
 			if err != nil {
@@ -295,7 +295,7 @@ func (dir *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fus
 		})()
 
 		if err != nil {
-			errorlog("Failed to set attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
+			logerror("Failed to set attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
 		} else {
 			dir.Attrs.Uid = req.Uid
 			dir.Attrs.Gid = req.Gid

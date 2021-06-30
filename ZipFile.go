@@ -30,7 +30,7 @@ func (zipfile *ZipFile) Attr(ctx context.Context, fuseAttr *fuse.Attr) error {
 func (zipfile *ZipFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
 	contentStream, err := zipfile.zipFile.Open()
 	if err != nil {
-		errorlog("Opened zip file failed", Fields{Operation: OpenArch, Archive: zipfile.Attrs.Name, Error: err})
+		logerror("Opened zip file failed", Fields{Operation: OpenArch, Archive: zipfile.Attrs.Name, Error: err})
 		return nil, err
 	}
 	// reporting to FUSE that the stream isn't seekable

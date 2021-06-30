@@ -93,7 +93,7 @@ func main() {
 		Max: 1024 * 1024}
 	err = syscall.Setrlimit(syscall.RLIMIT_NOFILE, &rLimit)
 	if err != nil {
-		errorlog(fmt.Sprintf("Failed to update the maximum number of file descriptors from 1K to 1M, %v", err), Fields{})
+		logerror(fmt.Sprintf("Failed to update the maximum number of file descriptors from 1K to 1M, %v", err), Fields{})
 	}
 
 	defer func() {
@@ -128,6 +128,6 @@ func main() {
 
 func createStagingDir() {
 	if err := os.MkdirAll(stagingDir, 0700); err != nil {
-		errorlog(fmt.Sprintf("Failed to create stageDir: %s. Error: %v", stagingDir, err), Fields{})
+		logerror(fmt.Sprintf("Failed to create stageDir: %s. Error: %v", stagingDir, err), Fields{})
 	}
 }

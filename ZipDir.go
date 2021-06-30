@@ -62,14 +62,14 @@ func (zd *ZipDir) ReadArchive() error {
 	var attr fuse.Attr
 	err := zd.ZipContainerFile.Attr(nil, &attr)
 	if err != nil {
-		errorlog("Error getting attrs", Fields{Operation: ReadArch, Archive: zd.ZipContainerFile.AbsolutePath(), Error: err})
+		logerror("Error getting attrs", Fields{Operation: ReadArch, Archive: zd.ZipContainerFile.AbsolutePath(), Error: err})
 		return err
 	}
 	zipArchiveReader, err := zip.NewReader(randomAccessReader, int64(attr.Size))
 	if err == nil {
-		infolog("Opened zip file", Fields{Operation: ReadArch, Archive: zd.ZipContainerFile.AbsolutePath()})
+		loginfo("Opened zip file", Fields{Operation: ReadArch, Archive: zd.ZipContainerFile.AbsolutePath()})
 	} else {
-		errorlog("Error opening zip file", Fields{Operation: ReadArch, Archive: zd.ZipContainerFile.AbsolutePath(), Error: err})
+		logerror("Error opening zip file", Fields{Operation: ReadArch, Archive: zd.ZipContainerFile.AbsolutePath(), Error: err})
 		return err
 	}
 

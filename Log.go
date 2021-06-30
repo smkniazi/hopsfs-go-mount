@@ -75,7 +75,7 @@ func initLogger(l string, out io.Writer) {
 	logger.SetFormatter(&nested.Formatter{
 		HideKeys:       false,
 		NoFieldsColors: true,
-		FieldsOrder:    []string{"msg", Operation, Path, Bytes, TotalBytesRead, TotalBytesWritten},
+		FieldsOrder:    []string{Operation, Path, Bytes, TotalBytesRead, TotalBytesWritten},
 	})
 
 	// Only log the warning severity or above.
@@ -84,26 +84,26 @@ func initLogger(l string, out io.Writer) {
 
 type Fields logger.Fields
 
-func tracelog(msg string, f Fields) {
+func logtrace(msg string, f Fields) {
 	logger.WithFields(logger.Fields(f)).Trace(msg)
 }
 
-func debuglog(msg string, f Fields) {
+func logdebug(msg string, f Fields) {
 	logger.WithFields(logger.Fields(f)).Debug(msg)
 }
 
-func infolog(msg string, f Fields) {
+func loginfo(msg string, f Fields) {
 	logger.WithFields(logger.Fields(f)).Info(msg)
 }
 
-func warnlog(msg string, f Fields) {
+func logwarn(msg string, f Fields) {
 	logger.WithFields(logger.Fields(f)).Warn(msg)
 }
 
-func errorlog(msg string, f Fields) {
+func logerror(msg string, f Fields) {
 	logger.WithFields(logger.Fields(f)).Error(msg)
 }
 
-func paniclog(msg string, f Fields) {
+func logpanic(msg string, f Fields) {
 	logger.WithFields(logger.Fields(f)).Panic(msg)
 }

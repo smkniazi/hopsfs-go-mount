@@ -17,10 +17,12 @@ import (
 
 // Represends a handle to an open file
 type FileHandle struct {
-	File      *File
-	Mutex     sync.Mutex // all operations on the handle are serialized to simplify invariants
-	handle    *os.File
-	fileFlags fuse.OpenFlags // flags used to creat the file
+	File              *File
+	Mutex             sync.Mutex // all operations on the handle are serialized to simplify invariants
+	handle            *os.File
+	fileFlags         fuse.OpenFlags // flags used to creat the file
+	tatalBytesRead    int64
+	totalBytesWritten int64
 }
 
 // Verify that *FileHandle implements necesary FUSE interfaces
@@ -113,37 +115,39 @@ func NewFileHandle(file *File, existsInDFS bool, flags fuse.OpenFlags) (*FileHan
 		return nil, err
 	}
 
-	//	isTrunc := false
-	//	isAppend := false
-	//	if (flags | fuse.OpenTruncate) == fuse.OpenTruncate {
-	//		isTrunc = true
-	//	}
-	//	if (flags | fuse.OpenAppend) == fuse.OpenAppend {
-	//		isAppend = true
-	//	}
-	truncateContent := flags.IsWriteOnly() && (flags&fuse.OpenAppend != fuse.OpenAppend)
-
-	if existsInDFS && !truncateContent {
+	if existsInDFS {
 		// TODO handle the case of truncate.
 		if err := fh.downloadToStaging(operation); err != nil {
 			return nil, err
 		}
 	}
 
-	if truncateContent {
-		infolog("Truncate file to 0", Fields{Operation: operation, Path: fh.File.AbsolutePath()})
-		os.Truncate(fh.File.tmpFile, 0)
-	}
-
-	// remove the O_EXCL flag as the staging file is now created.
-	//int((flags&^fuse.OpenExclusive)|fuse.OpenReadWrite)
-	fileHandle, err := os.OpenFile(fh.File.tmpFile, int(fuse.OpenReadWrite), 0600)
+	newFlags := fuse.OpenReadWrite
+	fileHandle, err := os.OpenFile(fh.File.tmpFile, int(newFlags), 0600)
 	if err != nil {
 		return nil, &os.PathError{Op: operation, Path: fh.File.tmpFile, Err: err}
 	}
+	infolog("Opened file", Fields{Operation: operation, Path: fh.File.AbsolutePath(), TmpFile: fh.File.tmpFile, Flags: fh.fileFlags})
 
 	fh.handle = fileHandle
 	return fh, nil
+}
+
+func (fh *FileHandle) isWriteable() bool {
+	if fh.fileFlags.IsWriteOnly() || fh.fileFlags.IsReadWrite() {
+		return true
+	} else {
+		return false
+	}
+}
+
+func (fh *FileHandle) Truncate(size int64) error {
+	err := fh.handle.Truncate(size)
+	if err != nil {
+		errorlog("Failed to truncate file", Fields{Operation: Truncate, Path: fh.File.AbsolutePath(), Bytes: size, Error: err})
+	}
+	infolog("Truncated file", Fields{Operation: Truncate, Path: fh.File.AbsolutePath(), Bytes: size})
+	return nil
 }
 
 func checkDiskSpace(hdfsAccessor HdfsAccessor) error {
@@ -179,6 +183,7 @@ func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fus
 
 	nr, err := fh.handle.Read(buf)
 	resp.Data = resp.Data[0:nr]
+	fh.tatalBytesRead += int64(nr)
 
 	if err != nil {
 		if err == io.EOF {
@@ -199,16 +204,9 @@ func (fh *FileHandle) Write(ctx context.Context, req *fuse.WriteRequest, resp *f
 	fh.Mutex.Lock()
 	defer fh.Mutex.Unlock()
 
-	var nw int
-	var err error
-	// if fh.fileFlags&fuse.OpenAppend == fuse.OpenAppend {
-	// Info.Println("using write API")
-	// nw, err = fh.handle.Write(req.Data)
-	// } else {
-	// Info.Println("using writeAt API")
-	nw, err = fh.handle.WriteAt(req.Data, req.Offset)
-	// }
+	nw, err := fh.handle.WriteAt(req.Data, req.Offset)
 	resp.Size = nw
+	fh.totalBytesWritten += int64(nw)
 	if err != nil {
 		errorlog("Failed to write to staging file", Fields{Operation: Write, Path: fh.File.AbsolutePath(), Error: err})
 		return err
@@ -299,16 +297,24 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 func (fh *FileHandle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 	fh.Mutex.Lock()
 	defer fh.Mutex.Unlock()
-	infolog("Flush file", Fields{Operation: Flush, Path: fh.File.AbsolutePath()})
-	return fh.copyToDFS(Flush)
+	if fh.isWriteable() {
+		infolog("Flush file", Fields{Operation: Flush, Path: fh.File.AbsolutePath()})
+		return fh.copyToDFS(Flush)
+	} else {
+		return nil
+	}
 }
 
 // Responds to the FUSE Fsync request
 func (fh *FileHandle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
 	fh.Mutex.Lock()
 	defer fh.Mutex.Unlock()
-	infolog("Fsync file", Fields{Operation: Fsync, Path: fh.File.AbsolutePath()})
-	return fh.copyToDFS(Fsync)
+	if fh.isWriteable() {
+		infolog("Fsync file", Fields{Operation: Fsync, Path: fh.File.AbsolutePath()})
+		return fh.copyToDFS(Fsync)
+	} else {
+		return nil
+	}
 }
 
 // Closes the handle
@@ -323,6 +329,12 @@ func (fh *FileHandle) Release(ctx context.Context, req *fuse.ReleaseRequest) err
 	fh.handle = nil
 	fh.File.InvalidateMetadataCache()
 	fh.File.RemoveHandle(fh)
-	infolog("Close file", Fields{Operation: Close, Path: fh.File.AbsolutePath()})
+
+	info, err := os.Stat(fh.File.tmpFile)
+	if err != nil {
+		errorlog("Failed to stat staging file", Fields{Operation: Close, Path: fh.File.AbsolutePath(), TmpFile: fh.File.tmpFile, Error: err})
+	}
+
+	infolog("Close file", Fields{Operation: Close, Path: fh.File.AbsolutePath(), Flags: fh.fileFlags, FileSize: info.Size(), TotalBytesRead: fh.tatalBytesRead, TotalBytesWritten: fh.totalBytesWritten})
 	return err
 }

@@ -115,6 +115,20 @@ func (file *File) InvalidateMetadataCache() {
 
 // Responds on FUSE Chmod request
 func (file *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
+
+	if req.Valid.Size() {
+		var retErr error
+		for _, handle := range file.GetActiveHandles() {
+			if handle.isWriteable() { // to only write enabled handles
+				err := handle.Truncate(int64(req.Size))
+				if err != nil {
+					retErr = err
+				}
+			}
+		}
+		return retErr
+	}
+
 	// Get the filepath, so chmod in hdfs can work
 	path := file.AbsolutePath()
 	var err error

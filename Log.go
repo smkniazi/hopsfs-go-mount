@@ -11,45 +11,49 @@ import (
 
 // bunch of constant for logging
 const (
-	Path           = "path"
-	Operation      = "op"
-	Mode           = "mode"
-	Flags          = "flags"
-	Bytes          = "bytes"
-	ReadDir        = "read_dir"
-	Read           = "read"
-	ReadArch       = "read_archive"
-	OpenArch       = "open_archive"
-	ReadHandle     = "create_read_handle"
-	Write          = "write"
-	WriteHandle    = "create_write_handle"
-	Open           = "open"
-	Remove         = "remove"
-	Create         = "create"
-	Rename         = "rename"
-	Chmod          = "chmod"
-	Chown          = "chown"
-	Fsync          = "fsync"
-	Flush          = "flush"
-	Close          = "close"
-	Stat           = "stat"
-	StatFS         = "statfs"
-	UID            = "uid"
-	GID            = "gid"
-	User           = "user"
-	Holes          = "holes"
-	Seeks          = "seeks"
-	HardSeeks      = "hard_seeks"
-	CacheHits      = "cache_hits"
-	TmpFile        = "tmp_file"
-	Archive        = "zip_file"
-	Error          = "error"
-	RetryingPolicy = "retry_policy"
-	Message        = "msg"
-	Retries        = "retries"
-	Diag           = "diag"
-	Delay          = "delay"
-	Entries        = "entries"
+	Path              = "path"
+	Operation         = "op"
+	Mode              = "mode"
+	Flags             = "flags"
+	Bytes             = "bytes"
+	ReadDir           = "read_dir"
+	Read              = "read"
+	ReadArch          = "read_archive"
+	OpenArch          = "open_archive"
+	ReadHandle        = "create_read_handle"
+	Write             = "write"
+	WriteHandle       = "create_write_handle"
+	Open              = "open"
+	Remove            = "remove"
+	Create            = "create"
+	Rename            = "rename"
+	Chmod             = "chmod"
+	Chown             = "chown"
+	Fsync             = "fsync"
+	Flush             = "flush"
+	Close             = "close"
+	Stat              = "stat"
+	StatFS            = "statfs"
+	UID               = "uid"
+	GID               = "gid"
+	User              = "user"
+	Holes             = "holes"
+	Seeks             = "seeks"
+	HardSeeks         = "hard_seeks"
+	CacheHits         = "cache_hits"
+	TmpFile           = "tmp_file"
+	Archive           = "zip_file"
+	Error             = "error"
+	RetryingPolicy    = "retry_policy"
+	Message           = "msg"
+	Retries           = "retries"
+	Diag              = "diag"
+	Delay             = "delay"
+	Entries           = "entries"
+	Truncate          = "truncate"
+	TotalBytesRead    = "total_bytes_read"
+	TotalBytesWritten = "total_bytes_written"
+	FileSize          = "file_size"
 )
 
 func initLogger(l string, out io.Writer) {
@@ -64,11 +68,14 @@ func initLogger(l string, out io.Writer) {
 	// TODO log to file and log cutting
 	logger.SetOutput(out)
 
-	//set formatter
+	//Json
+	// logger.SetFormatter(&logger.JSONFormatter{})
+
+	//set custom formatter github.com/antonfisher/nested-logrus-formatter
 	logger.SetFormatter(&nested.Formatter{
 		HideKeys:       false,
 		NoFieldsColors: true,
-		FieldsOrder:    []string{Operation, Path},
+		FieldsOrder:    []string{"msg", Operation, Path, Bytes, TotalBytesRead, TotalBytesWritten},
 	})
 
 	// Only log the warning severity or above.

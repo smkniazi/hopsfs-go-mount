@@ -116,7 +116,6 @@ func NewFileHandle(file *File, existsInDFS bool, flags fuse.OpenFlags) (*FileHan
 	}
 
 	if existsInDFS {
-		// TODO handle the case of truncate.
 		if err := fh.downloadToStaging(operation); err != nil {
 			return nil, err
 		}
@@ -175,13 +174,12 @@ func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fus
 	fh.Mutex.Lock()
 	defer fh.Mutex.Unlock()
 
-	buf := resp.Data[0:req.Size]
 	_, err := fh.handle.Seek(req.Offset, 0)
 	if err != nil {
 		return err
 	}
 
-	nr, err := fh.handle.Read(buf)
+	nr, err := fh.handle.Read(resp.Data)
 	resp.Data = resp.Data[0:nr]
 	fh.tatalBytesRead += int64(nr)
 
@@ -195,7 +193,7 @@ func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fus
 			return err
 		}
 	}
-	logdebug("Read from staging file", Fields{Operation: Read, Path: fh.File.AbsolutePath(), Bytes: nr})
+	logdebug("Read from staging file", Fields{Operation: Read, Path: fh.File.AbsolutePath(), TmpFile: fh.File.tmpFile, Bytes: nr, ReqOffset: req.Offset})
 	return err
 }
 
@@ -318,7 +316,7 @@ func (fh *FileHandle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
 }
 
 // Closes the handle
-func (fh *FileHandle) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
+func (fh *FileHandle) Release(_ context.Context, _ *fuse.ReleaseRequest) error {
 	fh.Mutex.Lock()
 	defer fh.Mutex.Unlock()
 	err := fh.handle.Close()

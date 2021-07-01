@@ -3,13 +3,15 @@
 package main
 
 import (
+	"fmt"
 	"io"
+	"runtime"
 
 	nested "github.com/antonfisher/nested-logrus-formatter"
 	logger "github.com/sirupsen/logrus"
 )
 
-// bunch of constant for logging
+// bunch of constants for logging
 const (
 	Path              = "path"
 	Operation         = "op"
@@ -54,13 +56,22 @@ const (
 	TotalBytesRead    = "total_bytes_read"
 	TotalBytesWritten = "total_bytes_written"
 	FileSize          = "file_size"
+	Line              = "line"
+	ReqOffset         = "req_offset"
 )
 
-func initLogger(l string, out io.Writer) {
+var ReportCaller = true
+
+func init() {
+	logger.SetLevel(logger.ErrorLevel)
+}
+
+func initLogger(l string, out io.Writer, reportCaller bool) {
+	ReportCaller = reportCaller
 	lvl, err := logger.ParseLevel(l)
 	if err != nil {
 		logger.Errorf("Invlid log level %s ", l)
-		lvl = logger.WarnLevel
+		lvl = logger.ErrorLevel
 	}
 
 	// Output to stdout instead of the default stderr
@@ -85,25 +96,54 @@ func initLogger(l string, out io.Writer) {
 type Fields logger.Fields
 
 func logtrace(msg string, f Fields) {
-	logger.WithFields(logger.Fields(f)).Trace(msg)
+	logmessae(logger.TraceLevel, msg, f)
 }
 
 func logdebug(msg string, f Fields) {
-	logger.WithFields(logger.Fields(f)).Debug(msg)
+	logmessae(logger.DebugLevel, msg, f)
 }
 
 func loginfo(msg string, f Fields) {
-	logger.WithFields(logger.Fields(f)).Info(msg)
+	logmessae(logger.InfoLevel, msg, f)
 }
 
 func logwarn(msg string, f Fields) {
-	logger.WithFields(logger.Fields(f)).Warn(msg)
+	logmessae(logger.WarnLevel, msg, f)
 }
 
 func logerror(msg string, f Fields) {
-	logger.WithFields(logger.Fields(f)).Error(msg)
+	logmessae(logger.ErrorLevel, msg, f)
 }
 
 func logpanic(msg string, f Fields) {
-	logger.WithFields(logger.Fields(f)).Panic(msg)
+	logmessae(logger.PanicLevel, msg, f)
+}
+
+func logmessae(lvl logger.Level, msg string, f Fields) {
+	if ReportCaller {
+		_, file, line, _ := runtime.Caller(2)
+		if f == nil {
+			f = Fields{}
+		}
+		f[Line] = fmt.Sprintf("%s:%d", file, line)
+	}
+
+	switch lvl {
+	case logger.PanicLevel:
+		logger.WithFields(logger.Fields(f)).Panic(msg)
+	case logger.FatalLevel:
+		logger.WithFields(logger.Fields(f)).Fatal(msg)
+	case logger.ErrorLevel:
+		logger.WithFields(logger.Fields(f)).Error(msg)
+	case logger.WarnLevel:
+		logger.WithFields(logger.Fields(f)).Warn(msg)
+	case logger.InfoLevel:
+		logger.WithFields(logger.Fields(f)).Info(msg)
+	case logger.DebugLevel:
+		logger.WithFields(logger.Fields(f)).Debug(msg)
+	case logger.TraceLevel:
+		logger.WithFields(logger.Fields(f)).Trace(msg)
+	default:
+		logger.WithFields(logger.Fields(f)).Info(msg)
+	}
 }

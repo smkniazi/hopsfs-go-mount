@@ -4,10 +4,11 @@ package main
 
 import (
 	"errors"
-	"github.com/golang/mock/gomock"
-	"github.com/stretchr/testify/assert"
 	"io"
 	"testing"
+
+	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/assert"
 )
 
 // Testing retry logic for Read()

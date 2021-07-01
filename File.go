@@ -66,8 +66,11 @@ func (file *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Op
 
 // Opens file for reading
 func (file *File) OpenRead() (ReadSeekCloser, error) {
-	logpanic("Unsupported operation", Fields{Operation: Open, Path: file.AbsolutePath()})
-	return nil, nil
+	handle, err := file.Open(nil, &fuse.OpenRequest{Flags: fuse.OpenReadOnly}, nil)
+	if err != nil {
+		return nil, err
+	}
+	return NewFileHandleAsReadSeekCloser(handle.(*FileHandle)), nil
 }
 
 // Registers an opened file handle

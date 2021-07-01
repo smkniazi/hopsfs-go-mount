@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"io"
 	"os"
@@ -13,10 +12,10 @@ import (
 )
 
 func init() {
-	flag.StringVar(&stagingDir, "stageDir", "/var/hdfs-mount", "set stage dir for test")
+	flag.StringVar(&stagingDir, "stageDir", "/tmp", "set stage dir for test")
 }
 
-func TestWriteFile(t *testing.T) {
+func TestReadWriteFile(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockClock := &MockClock{}
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
@@ -24,44 +23,35 @@ func TestWriteFile(t *testing.T) {
 	fs, _ := NewFileSystem(hdfsAccessor, "/tmp/x", []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
 
 	hdfswriter := NewMockHdfsWriter(mockCtrl)
-	hdfsAccessor.EXPECT().Remove(fileName).Return(nil)
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil)
-	hdfswriter.EXPECT().Close().Return(nil)
 
-	hdfsAccessor.EXPECT().Remove(fileName).Return(nil)
+	hdfswriter.EXPECT().Close().Return(nil).AnyTimes()
+	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), gomock.Any()).Return(hdfswriter, nil).AnyTimes()
+	hdfsAccessor.EXPECT().Stat(fileName).Return(Attrs{Name: fileName}, nil).AnyTimes()
+	hdfswriter.EXPECT().Close().Return(nil).AnyTimes()
+
 	root, _ := fs.Root()
-	_, h, _ := root.(*Dir).Create(nil, &fuse.CreateRequest{Name: fileName, Mode: os.FileMode(0757)}, &fuse.CreateResponse{})
+	_, h, err := root.(*Dir).Create(nil, &fuse.CreateRequest{Name: fileName,
+		Flags: fuse.OpenReadWrite | fuse.OpenCreate, Mode: os.FileMode(0757)}, &fuse.CreateResponse{})
 
-	// Test for newfilehandlewriter
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil)
-	hdfswriter.EXPECT().Close().Return(nil)
-	writeHandle, err := NewFileHandleWriter(h.(*FileHandle), true)
+	// file := root.(*Dir).NodeFromAttrs(Attrs{Name: fileName, Mode: os.FileMode(0757)}).(*File)
+	// writeHandle, err := NewFileHandle(file, true, fuse.OpenReadWrite)
+	fileHandle := h.(*FileHandle)
 	assert.Nil(t, err)
 
 	// Test for normal write
-	hdfsAccessor.EXPECT().StatFs().Return(FsInfo{capacity: uint64(100), used: uint64(20), remaining: uint64(80)}, nil)
-	err = writeHandle.Write(h.(*FileHandle), nil, &fuse.WriteRequest{Data: []byte("hello world"), Offset: int64(11)}, &fuse.WriteResponse{})
+	hdfsAccessor.EXPECT().StatFs().Return(FsInfo{capacity: uint64(100), used: uint64(20), remaining: uint64(80)}, nil).AnyTimes()
+	err = fileHandle.Write(nil, &fuse.WriteRequest{Data: []byte("hello world"), Offset: int64(0)}, &fuse.WriteResponse{})
 	assert.Nil(t, err)
-	assert.Equal(t, writeHandle.BytesWritten, uint64(11))
+	assert.Equal(t, fileHandle.totalBytesWritten, int64(11))
 
-	hdfsAccessor.EXPECT().Remove("/testWriteFile_1").Return(nil)
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil)
-	hdfswriter.EXPECT().Close().Return(nil)
-	binaryData := make([]byte, 65536, 65536)
-	nr, _ := writeHandle.stagingFile.Read(binaryData)
-	binaryData = binaryData[:nr]
-	hdfswriter.EXPECT().Write(binaryData).Return(11, nil)
-	err = writeHandle.Flush()
+	// now open the file gaing and read it.
+	buffer := make([]byte, 65536)
+	readReq := &fuse.ReadRequest{Offset: 0, Size: len(buffer)}
+	readResp := &fuse.ReadResponse{Data: buffer}
+	fileHandle.Read(nil, readReq, readResp)
+	assert.Equal(t, int(11), len(string(readResp.Data)))
+	err = fileHandle.Release(nil, nil)
 	assert.Nil(t, err)
-
-	// Test for closing file
-	err = writeHandle.Close()
-	assert.Nil(t, err)
-
-	// Test for writing file larger than available size
-	hdfsAccessor.EXPECT().StatFs().Return(FsInfo{capacity: uint64(100), used: uint64(95), remaining: uint64(5)}, nil)
-	err = writeHandle.Write(h.(*FileHandle), nil, &fuse.WriteRequest{Data: []byte("hello world"), Offset: int64(11)}, &fuse.WriteResponse{})
-	assert.Equal(t, errors.New("Too large file"), err)
 }
 
 func TestFaultTolerantWriteFile(t *testing.T) {
@@ -72,93 +62,99 @@ func TestFaultTolerantWriteFile(t *testing.T) {
 	fs, _ := NewFileSystem(hdfsAccessor, "/tmp/x", []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
 
 	hdfswriter := NewMockHdfsWriter(mockCtrl)
-	hdfsAccessor.EXPECT().Remove(fileName).Return(nil)
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil)
-	hdfswriter.EXPECT().Close().Return(nil)
 
-	hdfsAccessor.EXPECT().Remove(fileName).Return(nil)
+	hdfswriter.EXPECT().Close().Return(nil).AnyTimes()
+	hdfsAccessor.EXPECT().Stat(fileName).Return(Attrs{Name: fileName}, nil).AnyTimes()
+	hdfswriter.EXPECT().Close().Return(nil).AnyTimes()
+
+	hdfsAccessor.EXPECT().StatFs().Return(FsInfo{capacity: uint64(100), used: uint64(20), remaining: uint64(80)}, nil).AnyTimes()
+	hdfsAccessor.EXPECT().Remove("/testWriteFile_1").Return(nil).AnyTimes()
+	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), gomock.Any()).DoAndReturn(func(path string,
+		mode os.FileMode, overwrite bool) (HdfsWriter, error) {
+		// fmt.Println("-.....> ")
+		return hdfswriter, nil
+	}).AnyTimes()
+
 	root, _ := fs.Root()
-	_, h, _ := root.(*Dir).Create(nil, &fuse.CreateRequest{Name: fileName, Mode: os.FileMode(0757)}, &fuse.CreateResponse{})
+	_, h, err := root.(*Dir).Create(nil, &fuse.CreateRequest{Name: fileName,
+		Flags: fuse.OpenReadWrite | fuse.OpenCreate, Mode: os.FileMode(0757)}, &fuse.CreateResponse{})
 
 	// Test for newfilehandlewriter
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil)
-	hdfswriter.EXPECT().Close().Return(nil)
-	writeHandle, err := NewFileHandleWriter(h.(*FileHandle), true)
+	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil).AnyTimes()
+	hdfswriter.EXPECT().Close().Return(nil).AnyTimes()
+	writeHandle := h.(*FileHandle)
 	assert.Nil(t, err)
 
 	// Test for normal write
-	hdfsAccessor.EXPECT().StatFs().Return(FsInfo{capacity: uint64(100), used: uint64(20), remaining: uint64(80)}, nil)
-	err = writeHandle.Write(h.(*FileHandle), nil, &fuse.WriteRequest{Data: []byte("hello world"), Offset: int64(11)}, &fuse.WriteResponse{})
+	err = writeHandle.Write(nil, &fuse.WriteRequest{Data: []byte("hello world"), Offset: int64(0)}, &fuse.WriteResponse{})
 	assert.Nil(t, err)
-	assert.Equal(t, writeHandle.BytesWritten, uint64(11))
+	assert.Equal(t, writeHandle.totalBytesWritten, int64(11))
 
-	hdfsAccessor.EXPECT().Remove("/testWriteFile_1").Return(nil)
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil)
-	// hdfswriter.EXPECT().Close().Return(nil)
-	binaryData := make([]byte, 65536, 65536)
-	nr, _ := writeHandle.stagingFile.Read(binaryData)
+	binaryData := make([]byte, 65536)
+	writeHandle.handle.Seek(0, 0)
+	nr, _ := writeHandle.handle.Read(binaryData)
 	binaryData = binaryData[:nr]
 
 	// Mock the EOF error to test the fault tolerant write/flush
-	hdfswriter.EXPECT().Write(binaryData).Return(0, io.EOF)
-	hdfswriter.EXPECT().Close().Return(nil)
-	err = writeHandle.FlushAttempt()
+	hdfswriter.EXPECT().Write(binaryData).Return(0, io.EOF).AnyTimes()
+	hdfswriter.EXPECT().Close().Return(nil).AnyTimes()
+	err = writeHandle.FlushAttempt("test_flush")
 	assert.Equal(t, io.EOF, err)
 
 	// The connection would be closed
-	hdfsAccessor.EXPECT().Close().Return(nil)
+	hdfsAccessor.EXPECT().Close().Return(nil).AnyTimes()
 	// New connection being established
 	newhdfswriter := NewMockHdfsWriter(mockCtrl)
-	hdfsAccessor.EXPECT().StatFs().Return(FsInfo{capacity: uint64(100), used: uint64(20), remaining: uint64(80)}, nil)
-	hdfsAccessor.EXPECT().Remove(fileName).Return(nil)
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(newhdfswriter, nil)
-	newbinaryData := make([]byte, 65536, 65536)
-	newnr, _ := writeHandle.stagingFile.Read(binaryData)
-	newbinaryData = newbinaryData[:newnr]
-	newhdfswriter.EXPECT().Write(binaryData).Return(11, nil)
-	newhdfswriter.EXPECT().Close().Return(nil)
+	newhdfswriter.EXPECT().Write(binaryData).Return(11, nil).AnyTimes()
+	newhdfswriter.EXPECT().Close().Return(nil).AnyTimes()
+	hdfswriter = newhdfswriter
+	hdfsAccessor.EXPECT().StatFs().Return(FsInfo{capacity: uint64(100), used: uint64(20), remaining: uint64(80)}, nil).AnyTimes()
+	hdfsAccessor.EXPECT().Remove(fileName).Return(nil).AnyTimes()
+	// hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), gomock.Any()).Return(newhdfswriter, nil).AnyTimes()
 
-	hdfsAccessor.EXPECT().Remove(fileName).Return(nil)
-	err = writeHandle.Flush()
+	hdfsAccessor.EXPECT().Remove(fileName).Return(nil).AnyTimes()
+	err = writeHandle.Flush(nil, nil)
 	assert.Nil(t, err)
 
 	// Test for closing file
-	err = writeHandle.Close()
+	err = writeHandle.Release(nil, nil)
 	assert.Nil(t, err)
 }
 
 func TestFlushFile(t *testing.T) {
-	t.Skip("Cannot mock hdfsreader for overwiting file")
-
 	mockCtrl := gomock.NewController(t)
 	mockClock := &MockClock{}
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
+	readSeekCloser := NewMockReadSeekCloser(mockCtrl)
+
+	hdfsAccessor.EXPECT().OpenRead("/testWriteFile_2").Return(readSeekCloser, nil).AnyTimes()
+	readSeekCloser.EXPECT().Read(gomock.Any()).Return(0, io.EOF).AnyTimes()
+	readSeekCloser.EXPECT().Seek(gomock.Any()).Return(nil).AnyTimes()
+	readSeekCloser.EXPECT().Position().Return(int64(0), nil).AnyTimes()
+	readSeekCloser.EXPECT().Close().Return(nil).AnyTimes()
+
+	hdfswriter := NewMockHdfsWriter(mockCtrl)
+	hdfswriter.EXPECT().Close().Return(nil).AnyTimes()
+	hdfsAccessor.EXPECT().StatFs().Return(FsInfo{capacity: uint64(100), used: uint64(20), remaining: uint64(80)}, nil).AnyTimes()
+	hdfsAccessor.EXPECT().Stat("/testWriteFile_2").Return(Attrs{Name: "testWriteFile_2"}, nil)
 	fileName := "/testWriteFile_2"
 	fs, _ := NewFileSystem(hdfsAccessor, "/tmp/x", []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
 
-	hdfswriter := NewMockHdfsWriter(mockCtrl)
-	hdfsAccessor.EXPECT().Remove(fileName).Return(nil)
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil)
-	hdfswriter.EXPECT().Close().Return(nil)
-
-	root, _ := fs.Root()
-	_, h, _ := root.(*Dir).Create(nil, &fuse.CreateRequest{Name: fileName, Mode: os.FileMode(0757)}, &fuse.CreateResponse{})
+	hdfsAccessor.EXPECT().Remove(fileName).Return(nil).AnyTimes()
+	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil).AnyTimes()
+	hdfswriter.EXPECT().Close().Return(nil).AnyTimes()
 
 	// Test for newfilehandlewriter with existing file
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil)
-	hdfswriter.EXPECT().Close().Return(nil)
-	hdfsAccessor.EXPECT().StatFs().Return(FsInfo{capacity: uint64(100), used: uint64(20), remaining: uint64(80)}, nil)
-	hdfsAccessor.EXPECT().Stat("/testWriteFile_2").Return(Attrs{Name: "testWriteFile_2"}, nil)
-	// BUG: cannot mock the returned hdfsreader here
-	hdfsAccessor.EXPECT().OpenRead("/testWriteFile_2").Return(nil, nil)
-	writeHandle, err := NewFileHandleWriter(h.(*FileHandle), false)
-	assert.Nil(t, err)
+	root, _ := fs.Root()
+	file := root.(*Dir).NodeFromAttrs(Attrs{Name: "testWriteFile_2"}).(*File)
+	fh, _ := file.Open(nil, &fuse.OpenRequest{}, &fuse.OpenResponse{})
+	fileHandle := fh.(*FileHandle)
 
 	// Test for flush
-	_ = writeHandle.Write(h.(*FileHandle), nil, &fuse.WriteRequest{Data: []byte("hello world"), Offset: int64(11)}, &fuse.WriteResponse{})
-	err = writeHandle.Flush()
+	_ = fileHandle.Write(nil, &fuse.WriteRequest{Data: []byte("hello world"), Offset: int64(0)}, &fuse.WriteResponse{})
+	err := fileHandle.Flush(nil, nil)
 	assert.Nil(t, err)
 
-	err = writeHandle.Close()
+	err = fileHandle.Release(nil, nil)
 	assert.Nil(t, err)
 }

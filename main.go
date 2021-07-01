@@ -39,7 +39,7 @@ func main() {
 		"if specified the mount point will expose access to those prefixes only")
 	expandZips := flag.Bool("expandZips", false, "Enables automatic expansion of ZIP archives")
 	readOnly := flag.Bool("readOnly", false, "Enables mount with readonly")
-	flag.StringVar(&logLevel, "logLevel", "warn", "logs to be printed. error, warn, info, debug, trace")
+	flag.StringVar(&logLevel, "logLevel", "error", "logs to be printed. error, warn, info, debug, trace")
 	flag.StringVar(&stagingDir, "stageDir", "/var/hdfs-mount", "stage directory for writing file")
 	tls := flag.Bool("tls", false, "Enables tls connections")
 
@@ -61,7 +61,7 @@ func main() {
 
 	retryPolicy.MaxAttempts += 1 // converting # of retry attempts to total # of attempts
 
-	initLogger(logLevel, os.Stdout)
+	initLogger(logLevel, os.Stdout, false)
 
 	hdfsAccessor, err := NewHdfsAccessor(flag.Arg(0), WallClock{}, *tls)
 	if err != nil {

@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"os/user"
 	"path"
 	"sync"
@@ -19,9 +20,9 @@ type File struct {
 	Attrs      Attrs       // Cache of file attributes // TODO: implement TTL
 	Parent     *Dir        // Pointer to the parent directory (allows computing fully-qualified paths on demand)
 
-	activeHandles      []*FileHandle // list of opened file handles
-	activeHandlesMutex sync.Mutex    // mutex for activeHandles
-	tmpFile            string        // temporary copy of the file
+	activeHandles []*FileHandle // list of opened file handles
+	fileMutex     sync.Mutex    // mutex for activeHandles
+	handle        *os.File      // handle to the temp file in staging dir
 }
 
 // Verify that *File implements necesary FUSE interfaces
@@ -51,8 +52,8 @@ func (file *File) Attr(ctx context.Context, a *fuse.Attr) error {
 
 // Responds to the FUSE file open request (creates new file handle)
 func (file *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
-	file.activeHandlesMutex.Lock()
-	defer file.activeHandlesMutex.Unlock()
+	file.fileMutex.Lock()
+	defer file.fileMutex.Unlock()
 
 	logdebug("Opening file", Fields{Operation: Open, Path: file.AbsolutePath(), Flags: req.Flags})
 	handle, err := NewFileHandle(file, true, req.Flags)
@@ -66,6 +67,8 @@ func (file *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Op
 
 // Opens file for reading
 func (file *File) OpenRead() (ReadSeekCloser, error) {
+	file.fileMutex.Lock()
+	defer file.fileMutex.Unlock()
 	handle, err := file.Open(nil, &fuse.OpenRequest{Flags: fuse.OpenReadOnly}, nil)
 	if err != nil {
 		return nil, err
@@ -88,21 +91,11 @@ func (file *File) RemoveHandle(handle *FileHandle) {
 	}
 }
 
-// Returns a snapshot of opened file handles
-func (file *File) GetActiveHandles() []*FileHandle {
-	file.activeHandlesMutex.Lock()
-	defer file.activeHandlesMutex.Unlock()
-
-	snapshot := make([]*FileHandle, len(file.activeHandles))
-	copy(snapshot, file.activeHandles)
-	return snapshot
-}
-
 // Responds to the FUSE Fsync request
 func (file *File) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
-	loginfo(fmt.Sprintf("Dispatching fsync request to all open handles: %d", len(file.GetActiveHandles())), Fields{Operation: Fsync})
+	loginfo(fmt.Sprintf("Dispatching fsync request to all open handles: %d", len(file.activeHandles)), Fields{Operation: Fsync})
 	var retErr error
-	for _, handle := range file.GetActiveHandles() {
+	for _, handle := range file.activeHandles {
 		err := handle.Fsync(ctx, req)
 		if err != nil {
 			retErr = err
@@ -118,10 +111,12 @@ func (file *File) InvalidateMetadataCache() {
 
 // Responds on FUSE Chmod request
 func (file *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
+	file.fileMutex.Lock()
+	defer file.fileMutex.Unlock()
 
 	if req.Valid.Size() {
 		var retErr error
-		for _, handle := range file.GetActiveHandles() {
+		for _, handle := range file.activeHandles {
 			if handle.isWriteable() { // to only write enabled handles
 				err := handle.Truncate(int64(req.Size))
 				if err != nil {
@@ -181,4 +176,8 @@ func (file *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *f
 	}
 
 	return err
+}
+
+func (file *File) countActiveHandles() int {
+	return len(file.activeHandles)
 }

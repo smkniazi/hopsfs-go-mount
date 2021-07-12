@@ -46,6 +46,7 @@ const (
 	TmpFile           = "tmp_file"
 	Archive           = "zip_file"
 	Error             = "error"
+	Offset            = "offset"
 	RetryingPolicy    = "retry_policy"
 	Message           = "msg"
 	Retries           = "retries"

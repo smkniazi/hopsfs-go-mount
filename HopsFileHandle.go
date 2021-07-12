@@ -18,8 +18,7 @@ import (
 // Represends a handle to an open file
 type FileHandle struct {
 	File              *File
-	Mutex             sync.Mutex // all operations on the handle are serialized to simplify invariants
-	handle            *os.File
+	Mutex             sync.Mutex     // all operations on the handle are serialized to simplify invariants
 	fileFlags         fuse.OpenFlags // flags used to creat the file
 	tatalBytesRead    int64
 	totalBytesWritten int64
@@ -34,10 +33,8 @@ var _ fs.NodeFsyncer = (*FileHandle)(nil)
 var _ fs.HandleFlusher = (*FileHandle)(nil)
 
 func (fh *FileHandle) createStagingFile(operation string, existsInDFS bool) error {
-	if fh.File.tmpFile != "" {
-		if _, err := os.Stat(fh.File.tmpFile); err == nil {
-			return nil
-		}
+	if fh.File.handle != nil {
+		return nil // there is already an active handle.
 	}
 
 	//create staging file
@@ -65,20 +62,19 @@ func (fh *FileHandle) createStagingFile(operation string, existsInDFS bool) erro
 		logerror("Failed to create staging file", Fields{Operation: operation, Path: absPath, Error: err})
 		return err
 	}
-	defer stagingFile.Close()
-	fh.File.tmpFile = stagingFile.Name()
+	os.Remove(stagingFile.Name())
 	loginfo("Created staging file", Fields{Operation: operation, Path: absPath, TmpFile: stagingFile.Name()})
 
 	if existsInDFS {
-		if err := fh.downloadToStaging(operation); err != nil {
+		if err := fh.downloadToStaging(stagingFile, operation); err != nil {
 			return err
 		}
 	}
-
+	fh.File.handle = stagingFile
 	return nil
 }
 
-func (fh *FileHandle) downloadToStaging(operation string) error {
+func (fh *FileHandle) downloadToStaging(stagingFile *os.File, operation string) error {
 	hdfsAccessor := fh.File.FileSystem.HdfsAccessor
 	absPath := fh.File.AbsolutePath()
 
@@ -89,22 +85,13 @@ func (fh *FileHandle) downloadToStaging(operation string) error {
 		return &os.PathError{Op: operation, Path: absPath, Err: err}
 	}
 
-	tmpFileHandle, err := os.OpenFile(fh.File.tmpFile, os.O_CREATE|os.O_RDWR, 0600)
+	nc, err := io.Copy(stagingFile, reader)
 	if err != nil {
-		logerror("Failed to open staging file", Fields{Operation: operation, Path: absPath, TmpFile: fh.File.tmpFile, Error: err})
-		return &os.PathError{Op: operation, Path: absPath, Err: err}
-	}
-
-	nc, err := io.Copy(tmpFileHandle, reader)
-	if err != nil {
-		logerror("Failed to copy content to staging file", Fields{Operation: operation, Path: absPath, TmpFile: fh.File.tmpFile, Error: err})
-		tmpFileHandle.Close()
-		// TODO remote the statging file.
+		logerror("Failed to copy content to staging file", Fields{Operation: operation, Path: absPath, Error: err})
 		return &os.PathError{Op: operation, Path: absPath, Err: err}
 	}
 	reader.Close()
-	tmpFileHandle.Close()
-	logdebug(fmt.Sprintf("Downloaded a copy to stating dir. %d bytes copied", nc), Fields{Operation: operation, Path: fh.File.AbsolutePath()})
+	loginfo(fmt.Sprintf("Downloaded a copy to stating dir. %d bytes copied", nc), Fields{Operation: operation, Path: fh.File.AbsolutePath()})
 	return nil
 }
 
@@ -123,13 +110,7 @@ func NewFileHandle(file *File, existsInDFS bool, flags fuse.OpenFlags) (*FileHan
 		return nil, err
 	}
 
-	fileHandle, err := os.OpenFile(fh.File.tmpFile, os.O_RDWR, 0600)
-	if err != nil {
-		return nil, &os.PathError{Op: operation, Path: fh.File.tmpFile, Err: err}
-	}
-	loginfo("Opened file", Fields{Operation: operation, Path: fh.File.AbsolutePath(), TmpFile: fh.File.tmpFile, Flags: fh.fileFlags})
-
-	fh.handle = fileHandle
+	loginfo("Opened file", Fields{Operation: operation, Path: fh.File.AbsolutePath(), Flags: fh.fileFlags})
 	return fh, nil
 }
 
@@ -142,7 +123,7 @@ func (fh *FileHandle) isWriteable() bool {
 }
 
 func (fh *FileHandle) Truncate(size int64) error {
-	err := fh.handle.Truncate(size)
+	err := fh.File.handle.Truncate(size)
 	if err != nil {
 		logerror("Failed to truncate file", Fields{Operation: Truncate, Path: fh.File.AbsolutePath(), Bytes: size, Error: err})
 	}
@@ -176,7 +157,7 @@ func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fus
 	defer fh.Mutex.Unlock()
 
 	buf := resp.Data[0:req.Size]
-	nr, err := fh.handle.ReadAt(buf, req.Offset)
+	nr, err := fh.File.handle.ReadAt(buf, req.Offset)
 	resp.Data = buf[0:nr]
 	fh.tatalBytesRead += int64(nr)
 
@@ -190,7 +171,7 @@ func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fus
 			return err
 		}
 	}
-	logdebug("Read from staging file", Fields{Operation: Read, Path: fh.File.AbsolutePath(), TmpFile: fh.File.tmpFile, Bytes: nr, ReqOffset: req.Offset})
+	logdebug("Read from staging file", Fields{Operation: Read, Path: fh.File.AbsolutePath(), Bytes: nr, ReqOffset: req.Offset})
 	return err
 }
 
@@ -199,7 +180,7 @@ func (fh *FileHandle) Write(ctx context.Context, req *fuse.WriteRequest, resp *f
 	fh.Mutex.Lock()
 	defer fh.Mutex.Unlock()
 
-	nw, err := fh.handle.WriteAt(req.Data, req.Offset)
+	nw, err := fh.File.handle.WriteAt(req.Data, req.Offset)
 	resp.Size = nw
 	fh.totalBytesWritten += int64(nw)
 	if err != nil {
@@ -212,18 +193,12 @@ func (fh *FileHandle) Write(ctx context.Context, req *fuse.WriteRequest, resp *f
 }
 
 func (fh *FileHandle) copyToDFS(operation string) error {
-	info, _ := os.Stat(fh.File.tmpFile)
-	var size int64 = 0
-	if info != nil {
-		size = info.Size()
-	}
-
-	if size == 0 { // Nothing to do
+	if fh.totalBytesWritten == 0 { // Nothing to do
 		return nil
 	}
 	defer fh.File.InvalidateMetadataCache()
 
-	logdebug("Uploading to DFS", Fields{Operation: Write, Path: fh.File.AbsolutePath(), Bytes: size})
+	logdebug("Uploading to DFS", Fields{Operation: Write, Path: fh.File.AbsolutePath(), Bytes: TotalBytesWritten})
 
 	op := fh.File.FileSystem.RetryPolicy.StartOperation()
 	for {
@@ -250,17 +225,16 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 	}
 
 	//open the file for reading and upload to DFS
-	in, err := os.Open(fh.File.tmpFile)
-	if err != nil {
-		logerror("Failed to open staging file", Fields{Operation: operation, Path: fh.File.AbsolutePath(), TmpFile: fh.File.tmpFile, Error: err})
-		return &os.PathError{Op: operation, Path: fh.File.AbsolutePath(), Err: err}
+	offset, err := fh.File.handle.Seek(0, 0)
+	if err != nil || offset != 0 {
+		logerror("Unable to seek to the begenning of the temp file", Fields{Operation: operation, Path: fh.File.AbsolutePath(), Offset: offset, Error: err})
+		return err
 	}
-	defer in.Close()
 
 	b := make([]byte, 65536)
 	written := 0
 	for {
-		nr, err := in.Read(b)
+		nr, err := fh.File.handle.Read(b)
 		if err != nil {
 			if err != io.EOF {
 				logerror("Failed to read from staging file", Fields{Operation: operation, Path: fh.File.AbsolutePath(), Error: err})
@@ -316,20 +290,22 @@ func (fh *FileHandle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
 func (fh *FileHandle) Release(_ context.Context, _ *fuse.ReleaseRequest) error {
 	fh.Mutex.Lock()
 	defer fh.Mutex.Unlock()
-	err := fh.handle.Close()
 
-	if err != nil {
-		logerror("Failed to close staging file", Fields{Operation: Close, Path: fh.File.AbsolutePath(), Error: err})
-	}
-	fh.handle = nil
+	//close the file handle if it is the last handle
 	fh.File.InvalidateMetadataCache()
 	fh.File.RemoveHandle(fh)
-
-	info, err := os.Stat(fh.File.tmpFile)
-	if err != nil {
-		logerror("Failed to stat staging file", Fields{Operation: Close, Path: fh.File.AbsolutePath(), TmpFile: fh.File.tmpFile, Error: err})
+	activeHandles := fh.File.countActiveHandles()
+	if activeHandles == 0 {
+		err := fh.File.handle.Close()
+		if err != nil {
+			logerror("Failed to close staging file", Fields{Operation: Close, Path: fh.File.AbsolutePath(), Error: err})
+		}
+		fh.File.handle = nil
+		loginfo("Staging file is closed", Fields{Operation: Close, Path: fh.File.AbsolutePath(), Flags: fh.fileFlags, TotalBytesRead: fh.tatalBytesRead, TotalBytesWritten: fh.totalBytesWritten})
+	} else {
+		logdebug("Staging file is not closed becuase it has ", Fields{Operation: Close, Path: fh.File.AbsolutePath(), Flags: fh.fileFlags, TotalBytesRead: fh.tatalBytesRead, TotalBytesWritten: fh.totalBytesWritten})
 	}
 
-	loginfo("Close file", Fields{Operation: Close, Path: fh.File.AbsolutePath(), Flags: fh.fileFlags, FileSize: info.Size(), TotalBytesRead: fh.tatalBytesRead, TotalBytesWritten: fh.totalBytesWritten})
-	return err
+	loginfo("Close file", Fields{Operation: Close, Path: fh.File.AbsolutePath(), Flags: fh.fileFlags, TotalBytesRead: fh.tatalBytesRead, TotalBytesWritten: fh.totalBytesWritten})
+	return nil
 }

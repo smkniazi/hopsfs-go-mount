@@ -184,12 +184,14 @@ func (dir *Dir) LookupAttrs(name string, attrs *Attrs) error {
 	*attrs, err = dir.FileSystem.HdfsAccessor.Stat(path.Join(dir.AbsolutePath(), name))
 	if err != nil {
 		// It is a warning as each time new file write tries to stat if the file exists
-		logwarn("Stat failed", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name)})
+		loginfo("Stat failed", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name), Error: err})
 		if pathError, ok := err.(*os.PathError); ok && (pathError.Err == os.ErrNotExist) {
 			return fuse.ENOENT
 		}
 		return err
 	}
+
+	logdebug("Stat successful ", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name)})
 	// expiration time := now + 5 secs // TODO: make configurable
 	attrs.Expires = dir.FileSystem.Clock.Now().Add(5 * time.Second)
 	return nil

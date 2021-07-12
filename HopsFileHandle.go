@@ -49,6 +49,7 @@ func (fh *FileHandle) createStagingFile(operation string, existsInDFS bool) erro
 			logerror("Failed to create file in DFS", Fields{Operation: operation, Path: absPath, Error: err})
 			return err
 		}
+		loginfo("Created an empty file in DFS", Fields{Operation: operation, Path: absPath})
 		w.Close()
 	} else {
 		// Request to write to existing file
@@ -67,6 +68,13 @@ func (fh *FileHandle) createStagingFile(operation string, existsInDFS bool) erro
 	defer stagingFile.Close()
 	fh.File.tmpFile = stagingFile.Name()
 	loginfo("Created staging file", Fields{Operation: operation, Path: absPath, TmpFile: stagingFile.Name()})
+
+	if existsInDFS {
+		if err := fh.downloadToStaging(operation); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -115,14 +123,7 @@ func NewFileHandle(file *File, existsInDFS bool, flags fuse.OpenFlags) (*FileHan
 		return nil, err
 	}
 
-	if existsInDFS {
-		if err := fh.downloadToStaging(operation); err != nil {
-			return nil, err
-		}
-	}
-
-	newFlags := fuse.OpenReadWrite
-	fileHandle, err := os.OpenFile(fh.File.tmpFile, int(newFlags), 0600)
+	fileHandle, err := os.OpenFile(fh.File.tmpFile, os.O_RDWR, 0600)
 	if err != nil {
 		return nil, &os.PathError{Op: operation, Path: fh.File.tmpFile, Err: err}
 	}
@@ -174,13 +175,9 @@ func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fus
 	fh.Mutex.Lock()
 	defer fh.Mutex.Unlock()
 
-	_, err := fh.handle.Seek(req.Offset, 0)
-	if err != nil {
-		return err
-	}
-
-	nr, err := fh.handle.Read(resp.Data)
-	resp.Data = resp.Data[0:nr]
+	buf := resp.Data[0:req.Size]
+	nr, err := fh.handle.ReadAt(buf, req.Offset)
+	resp.Data = buf[0:nr]
 	fh.tatalBytesRead += int64(nr)
 
 	if err != nil {

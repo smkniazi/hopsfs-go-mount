@@ -5,7 +5,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
@@ -24,6 +23,7 @@ var Usage = func() {
 }
 
 var stagingDir string
+var logLevel string
 
 func main() {
 	sigs := make(chan os.Signal, 1)
@@ -39,7 +39,7 @@ func main() {
 		"if specified the mount point will expose access to those prefixes only")
 	expandZips := flag.Bool("expandZips", false, "Enables automatic expansion of ZIP archives")
 	readOnly := flag.Bool("readOnly", false, "Enables mount with readonly")
-	logLevel := flag.Int("logLevel", 0, "logs to be printed. 0: only fatal/err logs; 1: +warning logs; 2: +info logs")
+	flag.StringVar(&logLevel, "logLevel", "error", "logs to be printed. error, warn, info, debug, trace")
 	flag.StringVar(&stagingDir, "stageDir", "/var/hdfs-mount", "stage directory for writing file")
 	tls := flag.Bool("tls", false, "Enables tls connections")
 
@@ -53,19 +53,15 @@ func main() {
 		os.Exit(2)
 	}
 
+	createStagingDir()
+
 	log.Print("hdfs-mount: current head GITCommit: ", GITCOMMIT, ", Built time: ", BUILDTIME, ", Built by:", HOSTNAME)
 
 	allowedPrefixes := strings.Split(*allowedPrefixesString, ",")
 
 	retryPolicy.MaxAttempts += 1 // converting # of retry attempts to total # of attempts
 
-	if *logLevel == 0 {
-		InitLogger(ioutil.Discard, ioutil.Discard, os.Stdout, os.Stderr)
-	} else if *logLevel == 1 {
-		InitLogger(ioutil.Discard, os.Stdout, os.Stdout, os.Stderr)
-	} else {
-		InitLogger(os.Stdout, os.Stdout, os.Stdout, os.Stderr)
-	}
+	initLogger(logLevel, os.Stdout, false)
 
 	hdfsAccessor, err := NewHdfsAccessor(flag.Arg(0), WallClock{}, *tls)
 	if err != nil {
@@ -97,7 +93,7 @@ func main() {
 		Max: 1024 * 1024}
 	err = syscall.Setrlimit(syscall.RLIMIT_NOFILE, &rLimit)
 	if err != nil {
-		Error.Printf("Failed to update the maximum number of file descriptors from 1K to 1M, %v", err)
+		logerror(fmt.Sprintf("Failed to update the maximum number of file descriptors from 1K to 1M, %v", err), Fields{})
 	}
 
 	defer func() {
@@ -127,5 +123,11 @@ func main() {
 	<-c.Ready
 	if err := c.MountError; err != nil {
 		log.Fatal(err)
+	}
+}
+
+func createStagingDir() {
+	if err := os.MkdirAll(stagingDir, 0700); err != nil {
+		logerror(fmt.Sprintf("Failed to create stageDir: %s. Error: %v", stagingDir, err), Fields{})
 	}
 }

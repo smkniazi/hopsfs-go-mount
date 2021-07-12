@@ -4,6 +4,7 @@ package main
 
 import (
 	"archive/zip"
+
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"golang.org/x/net/context"
@@ -21,15 +22,15 @@ var _ fs.Node = (*ZipFile)(nil)
 var _ fs.NodeOpener = (*ZipFile)(nil)
 
 // Responds on FUSE Attr request to retrieve file attributes
-func (this *ZipFile) Attr(ctx context.Context, fuseAttr *fuse.Attr) error {
-	return this.Attrs.Attr(fuseAttr)
+func (zipfile *ZipFile) Attr(ctx context.Context, fuseAttr *fuse.Attr) error {
+	return zipfile.Attrs.Attr(fuseAttr)
 }
 
 // Responds on FUSE Open request for a file inside zip archive
-func (this *ZipFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
-	contentStream, err := this.zipFile.Open()
+func (zipfile *ZipFile) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
+	contentStream, err := zipfile.zipFile.Open()
 	if err != nil {
-		Error.Println("Opening [", this.Attrs.Name, "], error: ", err)
+		logerror("Opened zip file failed", Fields{Operation: OpenArch, Archive: zipfile.Attrs.Name, Error: err})
 		return nil, err
 	}
 	// reporting to FUSE that the stream isn't seekable

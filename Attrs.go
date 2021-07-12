@@ -3,9 +3,10 @@
 package main
 
 import (
-	"bazil.org/fuse"
 	"os"
 	"time"
+
+	"bazil.org/fuse"
 )
 
 // Attributes common to the file/directory HDFS nodes
@@ -24,29 +25,29 @@ type Attrs struct {
 
 // FsInfo provides information about HDFS
 type FsInfo struct {
-	capacity              uint64
-	used                  uint64
-	remaining             uint64
+	capacity  uint64
+	used      uint64
+	remaining uint64
 }
 
 // Converts Attrs datastructure into FUSE represnetation
-func (this *Attrs) Attr(a *fuse.Attr) error {
-	a.Inode = this.Inode
-	a.Mode = this.Mode
+func (attrs *Attrs) Attr(a *fuse.Attr) error {
+	a.Inode = attrs.Inode
+	a.Mode = attrs.Mode
 	if (a.Mode & os.ModeDir) == 0 {
-		a.Size = this.Size
+		a.Size = attrs.Size
 	}
-	a.Uid = this.Uid
-	a.Gid = this.Gid
-	a.Mtime = this.Mtime
-	a.Ctime = this.Ctime
-	a.Crtime = this.Crtime
+	a.Uid = attrs.Uid
+	a.Gid = attrs.Gid
+	a.Mtime = attrs.Mtime
+	a.Ctime = attrs.Ctime
+	a.Crtime = attrs.Crtime
 	return nil
 }
 
 // returns fuse.DirentType for this attributes (DT_Dir or DT_File)
-func (this *Attrs) FuseNodeType() fuse.DirentType {
-	if (this.Mode & os.ModeDir) == os.ModeDir {
+func (attrs *Attrs) FuseNodeType() fuse.DirentType {
+	if (attrs.Mode & os.ModeDir) == os.ModeDir {
 		return fuse.DT_Dir
 	} else {
 		return fuse.DT_File

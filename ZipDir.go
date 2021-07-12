@@ -4,11 +4,12 @@ package main
 
 import (
 	"archive/zip"
+	"strings"
+	"sync"
+
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"golang.org/x/net/context"
-	"strings"
-	"sync"
 )
 
 // Encapsulates state and operations for a directory inside a zip file on HDFS file system
@@ -36,56 +37,56 @@ func NewZipRootDir(zipContainerFile *File, attrs Attrs) *ZipDir {
 }
 
 // Responds on FUSE request to get directory attributes
-func (this *ZipDir) Attr(ctx context.Context, a *fuse.Attr) error {
-	return this.Attrs.Attr(a)
+func (zd *ZipDir) Attr(ctx context.Context, a *fuse.Attr) error {
+	return zd.Attrs.Attr(a)
 }
 
 // Reads a zip file (once) and pre-creates all the directory/file structure in memory
 // This happens under lock. Upen exit from a lock the resulting directory/file structure
 // is immutable and safe to access from multiple threads.
-func (this *ZipDir) ReadArchive() error {
-	if this.SubDirs != nil {
+func (zd *ZipDir) ReadArchive() error {
+	if zd.SubDirs != nil {
 		// Archive nodes have been already pre-created, nothing to do
 		return nil
 	}
-	this.ReadArchiveLock.Lock()
-	defer this.ReadArchiveLock.Unlock()
+	zd.ReadArchiveLock.Lock()
+	defer zd.ReadArchiveLock.Unlock()
 	// Repeating the check after taking a lock
-	if this.SubDirs != nil {
+	if zd.SubDirs != nil {
 		// Archive nodes have been already pre-created, nothing to do
 		return nil
 	}
 
 	// Opening zip file (reading metadata of all archived files)
-	randomAccessReader := NewRandomAccessReader(this.ZipContainerFile)
+	randomAccessReader := NewRandomAccessReader(zd.ZipContainerFile)
 	var attr fuse.Attr
-	err := this.ZipContainerFile.Attr(nil, &attr)
+	err := zd.ZipContainerFile.Attr(nil, &attr)
 	if err != nil {
-		Error.Println("Error opening zip file: ", this.ZipContainerFile.AbsolutePath(), " : ", err.Error())
+		logerror("Error getting attrs", Fields{Operation: ReadArch, Archive: zd.ZipContainerFile.AbsolutePath(), Error: err})
 		return err
 	}
 	zipArchiveReader, err := zip.NewReader(randomAccessReader, int64(attr.Size))
 	if err == nil {
-		Info.Println("Opened zip file: ", this.ZipContainerFile.AbsolutePath())
+		loginfo("Opened zip file", Fields{Operation: ReadArch, Archive: zd.ZipContainerFile.AbsolutePath()})
 	} else {
-		Error.Println("Opening zip file: ", this.ZipContainerFile.AbsolutePath(), " : ", err.Error())
+		logerror("Error opening zip file", Fields{Operation: ReadArch, Archive: zd.ZipContainerFile.AbsolutePath(), Error: err})
 		return err
 	}
 
 	// Register reader to be closed during unmount
-	this.ZipContainerFile.FileSystem.CloseOnUnmount(randomAccessReader)
+	zd.ZipContainerFile.FileSystem.CloseOnUnmount(randomAccessReader)
 
-	this.SubDirs = make(map[string]*ZipDir)
-	this.Files = make(map[string]*ZipFile)
+	zd.SubDirs = make(map[string]*ZipDir)
+	zd.Files = make(map[string]*ZipFile)
 
 	// Enumerating all files inside zip archive and pre-creating a tree of ZipDir and ZipFile structures
 	for _, zipFile := range zipArchiveReader.File {
-		dir := this
+		dir := zd
 		attrs := Attrs{
 			Mode:   zipFile.Mode() | 0700, // Cast the permission to RWX for owner
 			Mtime:  zipFile.ModTime(),
-			Uid:    this.Attrs.Uid,
-			Gid:    this.Attrs.Gid,
+			Uid:    zd.Attrs.Uid,
+			Gid:    zd.Attrs.Gid,
 			Ctime:  zipFile.ModTime(),
 			Crtime: zipFile.ModTime(),
 			Size:   zipFile.UncompressedSize64,
@@ -106,7 +107,7 @@ func (this *ZipDir) ReadArchive() error {
 					// Current path component is the last component of the path:
 					// Creating ZipFile
 					dir.Files[name] = &ZipFile{
-						FileSystem: this.ZipContainerFile.FileSystem,
+						FileSystem: zd.ZipContainerFile.FileSystem,
 						zipFile:    zipFile,
 						Attrs:      attrs}
 				} else {
@@ -114,7 +115,7 @@ func (this *ZipDir) ReadArchive() error {
 					// Creating ZipDir
 					dir.SubDirs[name] = &ZipDir{
 						zipFile:          zipFile,
-						ZipContainerFile: this.ZipContainerFile,
+						ZipContainerFile: zd.ZipContainerFile,
 						IsRoot:           false,
 						SubDirs:          make(map[string]*ZipDir),
 						Files:            make(map[string]*ZipFile),
@@ -127,36 +128,36 @@ func (this *ZipDir) ReadArchive() error {
 }
 
 // Responds on FUSE request to list directory contents
-func (this *ZipDir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
-	err := this.ReadArchive()
+func (zd *ZipDir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
+	err := zd.ReadArchive()
 	if err != nil {
 		return nil, err
 	}
 
-	entries := make([]fuse.Dirent, 0, len(this.SubDirs)+len(this.Files))
+	entries := make([]fuse.Dirent, 0, len(zd.SubDirs)+len(zd.Files))
 	// Creating Dirent structures as required by FUSE for subdirs and files
-	for name, _ := range this.SubDirs {
+	for name, _ := range zd.SubDirs {
 		entries = append(entries, fuse.Dirent{Name: name, Type: fuse.DT_Dir})
 	}
-	for name, _ := range this.Files {
+	for name, _ := range zd.Files {
 		entries = append(entries, fuse.Dirent{Name: name, Type: fuse.DT_File})
 	}
 	return entries, nil
 }
 
 // Responds on FUSE request to lookup the directory
-func (this *ZipDir) Lookup(ctx context.Context, name string) (fs.Node, error) {
+func (zd *ZipDir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	// Responds on FUSE request to Looks up a file or directory by name
-	err := this.ReadArchive()
+	err := zd.ReadArchive()
 	if err != nil {
 		return nil, err
 	}
 
-	if subDir, ok := this.SubDirs[name]; ok {
+	if subDir, ok := zd.SubDirs[name]; ok {
 		return subDir, nil
 	}
 
-	if file, ok := this.Files[name]; ok {
+	if file, ok := zd.Files[name]; ok {
 		return file, nil
 	}
 

@@ -22,10 +22,10 @@ func NewFaultTolerantHdfsAccessor(impl HdfsAccessor, retryPolicy *RetryPolicy) *
 }
 
 // Ensures HDFS accessor is connected to the HDFS name node
-func (this *FaultTolerantHdfsAccessor) EnsureConnected() error {
-	op := this.RetryPolicy.StartOperation()
+func (fta *FaultTolerantHdfsAccessor) EnsureConnected() error {
+	op := fta.RetryPolicy.StartOperation()
 	for {
-		err := this.Impl.EnsureConnected()
+		err := fta.Impl.EnsureConnected()
 		if IsSuccessOrBenignError(err) || !op.ShouldRetry("Connect: %s", err) {
 			return err
 		}
@@ -33,142 +33,142 @@ func (this *FaultTolerantHdfsAccessor) EnsureConnected() error {
 }
 
 // Opens HDFS file for reading
-func (this *FaultTolerantHdfsAccessor) OpenRead(path string) (ReadSeekCloser, error) {
-	op := this.RetryPolicy.StartOperation()
+func (fta *FaultTolerantHdfsAccessor) OpenRead(path string) (ReadSeekCloser, error) {
+	op := fta.RetryPolicy.StartOperation()
 	for {
-		result, err := this.Impl.OpenRead(path)
+		result, err := fta.Impl.OpenRead(path)
 		if err == nil {
 			// wrapping returned HdfsReader with FaultTolerantHdfsReader
-			return NewFaultTolerantHdfsReader(path, result, this.Impl, this.RetryPolicy), nil
+			return NewFaultTolerantHdfsReader(path, result, fta.Impl, fta.RetryPolicy), nil
 		}
 		if IsSuccessOrBenignError(err) || !op.ShouldRetry("[%s] OpenRead: %s", path, err) {
 			return nil, err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh
-			this.Impl.Close()
+			fta.Impl.Close()
 		}
 	}
 }
 
 // Opens HDFS file for writing
-func (this *FaultTolerantHdfsAccessor) CreateFile(path string, mode os.FileMode) (HdfsWriter, error) {
+func (fta *FaultTolerantHdfsAccessor) CreateFile(path string, mode os.FileMode, overwrite bool) (HdfsWriter, error) {
 	// TODO: implement fault-tolerance. For now re-try-loop is implemented inside FileHandleWriter
-	return this.Impl.CreateFile(path, mode)
+	return fta.Impl.CreateFile(path, mode, overwrite)
 }
 
 // Enumerates HDFS directory
-func (this *FaultTolerantHdfsAccessor) ReadDir(path string) ([]Attrs, error) {
-	op := this.RetryPolicy.StartOperation()
+func (fta *FaultTolerantHdfsAccessor) ReadDir(path string) ([]Attrs, error) {
+	op := fta.RetryPolicy.StartOperation()
 	for {
-		result, err := this.Impl.ReadDir(path)
+		result, err := fta.Impl.ReadDir(path)
 		if IsSuccessOrBenignError(err) || !op.ShouldRetry("[%s] ReadDir: %s", path, err) {
 			return result, err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh
-			this.Impl.Close()
+			fta.Impl.Close()
 		}
 	}
 }
 
 // Retrieves file/directory attributes
-func (this *FaultTolerantHdfsAccessor) Stat(path string) (Attrs, error) {
-	op := this.RetryPolicy.StartOperation()
+func (fta *FaultTolerantHdfsAccessor) Stat(path string) (Attrs, error) {
+	op := fta.RetryPolicy.StartOperation()
 	for {
-		result, err := this.Impl.Stat(path)
+		result, err := fta.Impl.Stat(path)
 		if IsSuccessOrBenignError(err) || !op.ShouldRetry("[%s] Stat: %s", path, err) {
 			return result, err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh
-			this.Impl.Close()
+			fta.Impl.Close()
 		}
 	}
 }
 
 // Retrieves HDFS usage
-func (this *FaultTolerantHdfsAccessor) StatFs() (FsInfo, error) {
-	op := this.RetryPolicy.StartOperation()
+func (fta *FaultTolerantHdfsAccessor) StatFs() (FsInfo, error) {
+	op := fta.RetryPolicy.StartOperation()
 	for {
-		result, err := this.Impl.StatFs()
+		result, err := fta.Impl.StatFs()
 		if IsSuccessOrBenignError(err) || !op.ShouldRetry("StatFs: %s", err) {
 			return result, err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh
-			this.Impl.Close()
+			fta.Impl.Close()
 		}
 	}
 }
 
 // Creates a directory
-func (this *FaultTolerantHdfsAccessor) Mkdir(path string, mode os.FileMode) error {
-	op := this.RetryPolicy.StartOperation()
+func (fta *FaultTolerantHdfsAccessor) Mkdir(path string, mode os.FileMode) error {
+	op := fta.RetryPolicy.StartOperation()
 	for {
-		err := this.Impl.Mkdir(path, mode)
+		err := fta.Impl.Mkdir(path, mode)
 		if IsSuccessOrBenignError(err) || !op.ShouldRetry("[%s] Mkdir %s: %s", path, mode, err) {
 			return err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh
-			this.Impl.Close()
+			fta.Impl.Close()
 		}
 	}
 }
 
 // Removes a file or directory
-func (this *FaultTolerantHdfsAccessor) Remove(path string) error {
-	op := this.RetryPolicy.StartOperation()
+func (fta *FaultTolerantHdfsAccessor) Remove(path string) error {
+	op := fta.RetryPolicy.StartOperation()
 	for {
-		err := this.Impl.Remove(path)
+		err := fta.Impl.Remove(path)
 		if IsSuccessOrBenignError(err) || !op.ShouldRetry("[%s] Remove: %s", path, err) {
 			return err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh
-			this.Impl.Close()
+			fta.Impl.Close()
 		}
 	}
 }
 
 // Renames file or directory
-func (this *FaultTolerantHdfsAccessor) Rename(oldPath string, newPath string) error {
-	op := this.RetryPolicy.StartOperation()
+func (fta *FaultTolerantHdfsAccessor) Rename(oldPath string, newPath string) error {
+	op := fta.RetryPolicy.StartOperation()
 	for {
-		err := this.Impl.Rename(oldPath, newPath)
+		err := fta.Impl.Rename(oldPath, newPath)
 		if IsSuccessOrBenignError(err) || !op.ShouldRetry("[%s] Rename to %s: %s", oldPath, newPath, err) {
 			return err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh
-			this.Impl.Close()
+			fta.Impl.Close()
 		}
 	}
 }
 
 // Chmod file or directory
-func (this *FaultTolerantHdfsAccessor) Chmod(path string, mode os.FileMode) error {
-	op := this.RetryPolicy.StartOperation()
+func (fta *FaultTolerantHdfsAccessor) Chmod(path string, mode os.FileMode) error {
+	op := fta.RetryPolicy.StartOperation()
 	for {
-		err := this.Impl.Chmod(path, mode)
+		err := fta.Impl.Chmod(path, mode)
 		if IsSuccessOrBenignError(err) || !op.ShouldRetry("Chmod [%s] to [%d]: %s", path, mode, err) {
 			return err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh
-			this.Impl.Close()
+			fta.Impl.Close()
 		}
 	}
 }
 
 // Chown file or directory
-func (this *FaultTolerantHdfsAccessor) Chown(path string, user, group string) error {
-	op := this.RetryPolicy.StartOperation()
+func (fta *FaultTolerantHdfsAccessor) Chown(path string, user, group string) error {
+	op := fta.RetryPolicy.StartOperation()
 	for {
-		err := this.Impl.Chown(path, user, group)
+		err := fta.Impl.Chown(path, user, group)
 		if IsSuccessOrBenignError(err) || !op.ShouldRetry("Chown [%s] to [%s:%s]: %s", path, user, group, err) {
 			return err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh
-			this.Impl.Close()
+			fta.Impl.Close()
 		}
 	}
 }
 
 // Close underline connection if needed
-func (this *FaultTolerantHdfsAccessor) Close() error {
-	return this.Impl.Close()
+func (fta *FaultTolerantHdfsAccessor) Close() error {
+	return fta.Impl.Close()
 }

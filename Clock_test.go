@@ -14,20 +14,20 @@ type MockClock struct {
 var _ Clock = (*MockClock)(nil) // ensure MockClock implements Clock
 
 // Returns current time
-func (this *MockClock) Now() time.Time {
-	return this.now
+func (mc *MockClock) Now() time.Time {
+	return mc.now
 }
 
 // After waits for the duration to elapse and then sends the current time
 // on the returned channel
-func (this *MockClock) After(d time.Duration) <-chan time.Time {
-	this.LastSleepDuration = d
+func (mc *MockClock) After(d time.Duration) <-chan time.Time {
+	mc.LastSleepDuration = d
 	c := make(chan time.Time, 1)
-	c <- this.now
+	c <- mc.now
 	return c
 }
 
 // Tells mock clock about time progression
-func (this *MockClock) NotifyTimeElapsed(d time.Duration) {
-	this.now = this.Now().Add(d)
+func (mc *MockClock) NotifyTimeElapsed(d time.Duration) {
+	mc.now = mc.Now().Add(d)
 }

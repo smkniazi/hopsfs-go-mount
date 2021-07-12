@@ -3,13 +3,14 @@
 package main
 
 import (
-	"bazil.org/fuse"
-	"bazil.org/fuse/fs"
-	"golang.org/x/net/context"
 	"io"
 	"math/rand"
 	"sync"
 	"time"
+
+	"bazil.org/fuse"
+	"bazil.org/fuse/fs"
+	"golang.org/x/net/context"
 )
 
 // Encapsulates a file handle for a file inside a zip archive
@@ -30,15 +31,15 @@ func NewZipFileHandle(contentStream io.ReadCloser) *ZipFileHandle {
 }
 
 // Releases (closes) the handle
-func (this *ZipFileHandle) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
-	return this.ContentStream.Close()
+func (zfh *ZipFileHandle) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
+	return zfh.ContentStream.Close()
 }
 
 // Responds on FUSE Read request
-func (this *ZipFileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-	for req.Offset != this.offset {
+func (zfh *ZipFileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
+	zfh.lock.Lock()
+	defer zfh.lock.Unlock()
+	for req.Offset != zfh.offset {
 		// Since file is opened in fuse.OpenNonSeekable mode, we expect kernel to issue sequential reads.
 		// However kernel might issue multiple read-ahead requests, one after another, but and they might be
 		// reordered by underlying bazil/fuse library because it fans out each request to a separate concurrent goroutine.
@@ -46,15 +47,15 @@ func (this *ZipFileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp
 		// in this case yielding for other instance of concurrent go-routine.
 		// This is a temporary workaround, we'll need to find better solution
 		// TODO: consider addressing this at bazil/fuse, by adding per-handle request serialization feature which preserves ordering
-		this.lock.Unlock()
+		zfh.lock.Unlock()
 		time.Sleep(time.Duration(rand.Int31n(10)) * time.Millisecond)
-		this.lock.Lock()
+		zfh.lock.Lock()
 	}
 
 	// reading requested bytes
 	buffer := make([]byte, req.Size)
-	nr, err := io.ReadFull(this.ContentStream, buffer)
-	this.offset += int64(nr)
+	nr, err := io.ReadFull(zfh.ContentStream, buffer)
+	zfh.offset += int64(nr)
 	if err == io.EOF || err == io.ErrUnexpectedEOF {
 		// EOF isn't an error from the FUSE's point of view
 		err = nil

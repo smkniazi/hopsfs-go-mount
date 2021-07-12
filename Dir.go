@@ -3,16 +3,17 @@
 package main
 
 import (
-	"bazil.org/fuse"
-	"bazil.org/fuse/fs"
 	"fmt"
-	"golang.org/x/net/context"
 	"os"
 	"os/user"
 	"path"
 	"strings"
 	"sync"
 	"time"
+
+	"bazil.org/fuse"
+	"bazil.org/fuse/fs"
+	"golang.org/x/net/context"
 )
 
 // Encapsulates state and operations for directory node on the HDFS file system
@@ -33,17 +34,17 @@ var _ fs.NodeRemover = (*Dir)(nil)
 var _ fs.NodeRenamer = (*Dir)(nil)
 
 // Returns absolute path of the dir in HDFS namespace
-func (this *Dir) AbsolutePath() string {
-	if this.Parent == nil {
+func (dir *Dir) AbsolutePath() string {
+	if dir.Parent == nil {
 		return "/"
 	} else {
-		return path.Join(this.Parent.AbsolutePath(), this.Attrs.Name)
+		return path.Join(dir.Parent.AbsolutePath(), dir.Attrs.Name)
 	}
 }
 
 // Returns absolute path of the child item of this directory
-func (this *Dir) AbsolutePathForChild(name string) string {
-	path := this.AbsolutePath()
+func (dir *Dir) AbsolutePathForChild(name string) string {
+	path := dir.AbsolutePath()
 	if path != "/" {
 		path = path + "/"
 	}
@@ -51,60 +52,60 @@ func (this *Dir) AbsolutePathForChild(name string) string {
 }
 
 // Responds on FUSE request to get directory attributes
-func (this *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
-	if this.Parent != nil && this.FileSystem.Clock.Now().After(this.Attrs.Expires) {
-		err := this.Parent.LookupAttrs(this.Attrs.Name, &this.Attrs)
+func (dir *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
+	if dir.Parent != nil && dir.FileSystem.Clock.Now().After(dir.Attrs.Expires) {
+		err := dir.Parent.LookupAttrs(dir.Attrs.Name, &dir.Attrs)
 		if err != nil {
 			return err
 		}
 
 	}
-	return this.Attrs.Attr(a)
+	return dir.Attrs.Attr(a)
 }
 
-func (this *Dir) EntriesGet(name string) fs.Node {
-	this.EntriesMutex.Lock()
-	defer this.EntriesMutex.Unlock()
-	if this.Entries == nil {
-		this.Entries = make(map[string]fs.Node)
+func (dir *Dir) EntriesGet(name string) fs.Node {
+	dir.EntriesMutex.Lock()
+	defer dir.EntriesMutex.Unlock()
+	if dir.Entries == nil {
+		dir.Entries = make(map[string]fs.Node)
 		return nil
 	}
-	return this.Entries[name]
+	return dir.Entries[name]
 }
 
-func (this *Dir) EntriesSet(name string, node fs.Node) {
-	this.EntriesMutex.Lock()
-	defer this.EntriesMutex.Unlock()
+func (dir *Dir) EntriesSet(name string, node fs.Node) {
+	dir.EntriesMutex.Lock()
+	defer dir.EntriesMutex.Unlock()
 
-	if this.Entries == nil {
-		this.Entries = make(map[string]fs.Node)
+	if dir.Entries == nil {
+		dir.Entries = make(map[string]fs.Node)
 	}
 
-	this.Entries[name] = node
+	dir.Entries[name] = node
 }
 
-func (this *Dir) EntriesRemove(name string) {
-	this.EntriesMutex.Lock()
-	defer this.EntriesMutex.Unlock()
-	if this.Entries != nil {
-		delete(this.Entries, name)
+func (dir *Dir) EntriesRemove(name string) {
+	dir.EntriesMutex.Lock()
+	defer dir.EntriesMutex.Unlock()
+	if dir.Entries != nil {
+		delete(dir.Entries, name)
 	}
 }
 
 // Responds on FUSE request to lookup the directory
-func (this *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
-	if !this.FileSystem.IsPathAllowed(this.AbsolutePathForChild(name)) {
+func (dir *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
+	if !dir.FileSystem.IsPathAllowed(dir.AbsolutePathForChild(name)) {
 		return nil, fuse.ENOENT
 	}
 
-	if node := this.EntriesGet(name); node != nil {
+	if node := dir.EntriesGet(name); node != nil {
 		return node, nil
 	}
 
-	if this.FileSystem.ExpandZips && strings.HasSuffix(name, ".zip@") {
+	if dir.FileSystem.ExpandZips && strings.HasSuffix(name, ".zip@") {
 		// looking up original zip file
 		zipFileName := name[:len(name)-1]
-		zipFileNode, err := this.Lookup(nil, zipFileName)
+		zipFileNode, err := dir.Lookup(nil, zipFileName)
 		if err != nil {
 			return nil, err
 		}
@@ -120,26 +121,27 @@ func (this *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	}
 
 	var attrs Attrs
-	err := this.LookupAttrs(name, &attrs)
+	err := dir.LookupAttrs(name, &attrs)
 	if err != nil {
 		return nil, err
 	}
-	return this.NodeFromAttrs(attrs), nil
+	return dir.NodeFromAttrs(attrs), nil
 }
 
 // Responds on FUSE request to read directory
-func (this *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
-	absolutePath := this.AbsolutePath()
-	Info.Println("[", absolutePath, "]ReadDirAll")
+func (dir *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
+	absolutePath := dir.AbsolutePath()
+	loginfo("Read directory", Fields{Operation: ReadDir, Path: absolutePath})
 
-	allAttrs, err := this.FileSystem.HdfsAccessor.ReadDir(absolutePath)
+	allAttrs, err := dir.FileSystem.HdfsAccessor.ReadDir(absolutePath)
 	if err != nil {
-		Warning.Println("ls [", absolutePath, "]: ", err)
+		logwarn("Failed to list DFS directory", Fields{Operation: ReadDir, Path: absolutePath, Error: err})
 		return nil, err
 	}
+
 	entries := make([]fuse.Dirent, 0, len(allAttrs))
 	for _, a := range allAttrs {
-		if this.FileSystem.IsPathAllowed(this.AbsolutePathForChild(a.Name)) {
+		if dir.FileSystem.IsPathAllowed(dir.AbsolutePathForChild(a.Name)) {
 			// Creating Dirent structure as required by FUSE
 			entries = append(entries, fuse.Dirent{
 				Inode: a.Inode,
@@ -148,9 +150,9 @@ func (this *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 			// Speculatively pre-creating child Dir or File node with cached attributes,
 			// since it's highly likely that we will have Lookup() call for this name
 			// This is the key trick which dramatically speeds up 'ls'
-			this.NodeFromAttrs(a)
+			dir.NodeFromAttrs(a)
 
-			if this.FileSystem.ExpandZips {
+			if dir.FileSystem.ExpandZips {
 				// Creating a virtual directory next to each zip file
 				// (appending '@' to the zip file name)
 				if !a.Mode.IsDir() && strings.HasSuffix(a.Name, ".zip") {
@@ -165,51 +167,53 @@ func (this *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 }
 
 // Creates typed node (Dir or File) from the attributes
-func (this *Dir) NodeFromAttrs(attrs Attrs) fs.Node {
+func (dir *Dir) NodeFromAttrs(attrs Attrs) fs.Node {
 	var node fs.Node
 	if (attrs.Mode & os.ModeDir) == 0 {
-		node = &File{FileSystem: this.FileSystem, Parent: this, Attrs: attrs}
+		node = &File{FileSystem: dir.FileSystem, Parent: dir, Attrs: attrs}
 	} else {
-		node = &Dir{FileSystem: this.FileSystem, Parent: this, Attrs: attrs}
+		node = &Dir{FileSystem: dir.FileSystem, Parent: dir, Attrs: attrs}
 	}
-	this.EntriesSet(attrs.Name, node)
+	dir.EntriesSet(attrs.Name, node)
 	return node
 }
 
 // Performs Stat() query on the backend
-func (this *Dir) LookupAttrs(name string, attrs *Attrs) error {
+func (dir *Dir) LookupAttrs(name string, attrs *Attrs) error {
 	var err error
-	*attrs, err = this.FileSystem.HdfsAccessor.Stat(path.Join(this.AbsolutePath(), name))
+	*attrs, err = dir.FileSystem.HdfsAccessor.Stat(path.Join(dir.AbsolutePath(), name))
 	if err != nil {
 		// It is a warning as each time new file write tries to stat if the file exists
-		Warning.Print("stat [", name, "]: ", err.Error(), err)
+		loginfo("Stat failed", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name), Error: err})
 		if pathError, ok := err.(*os.PathError); ok && (pathError.Err == os.ErrNotExist) {
 			return fuse.ENOENT
 		}
 		return err
 	}
+
+	logdebug("Stat successful ", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name)})
 	// expiration time := now + 5 secs // TODO: make configurable
-	attrs.Expires = this.FileSystem.Clock.Now().Add(5 * time.Second)
+	attrs.Expires = dir.FileSystem.Clock.Now().Add(5 * time.Second)
 	return nil
 }
 
 // Responds on FUSE Mkdir request
-func (this *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, error) {
-	err := this.FileSystem.HdfsAccessor.Mkdir(this.AbsolutePathForChild(req.Name), req.Mode)
+func (dir *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, error) {
+	err := dir.FileSystem.HdfsAccessor.Mkdir(dir.AbsolutePathForChild(req.Name), req.Mode)
 	if err != nil {
 		return nil, err
 	}
-	return this.NodeFromAttrs(Attrs{Name: req.Name, Mode: req.Mode | os.ModeDir}), nil
+	return dir.NodeFromAttrs(Attrs{Name: req.Name, Mode: req.Mode | os.ModeDir}), nil
 }
 
 // Responds on FUSE Create request
-func (this *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
-	Info.Println("[", this.AbsolutePathForChild(req.Name), "] Create ", req.Mode)
-	file := this.NodeFromAttrs(Attrs{Name: req.Name, Mode: req.Mode}).(*File)
-	handle := NewFileHandle(file)
-	err := handle.EnableWrite(true)
+func (dir *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
+	loginfo("Creating a new file", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags})
+
+	file := dir.NodeFromAttrs(Attrs{Name: req.Name, Mode: req.Mode}).(*File)
+	handle, err := NewFileHandle(file, false, req.Flags)
 	if err != nil {
-		Error.Println("Can't create file: ", this.AbsolutePathForChild(req.Name), err)
+		logerror("File creation failed", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags, Error: err})
 		return nil, nil, err
 	}
 	file.AddHandle(handle)
@@ -217,31 +221,33 @@ func (this *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse
 }
 
 // Responds on FUSE Remove request
-func (this *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
-	path := this.AbsolutePathForChild(req.Name)
-	Info.Println("Remove", path)
-	err := this.FileSystem.HdfsAccessor.Remove(path)
+func (dir *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
+	path := dir.AbsolutePathForChild(req.Name)
+	loginfo("Removing path", Fields{Operation: Remove, Path: path})
+	err := dir.FileSystem.HdfsAccessor.Remove(path)
 	if err == nil {
-		this.EntriesRemove(req.Name)
+		dir.EntriesRemove(req.Name)
+	} else {
+		logerror("Failed to remove path", Fields{Operation: Remove, Path: path, Error: err})
 	}
 	return err
 }
 
 // Responds on FUSE Rename request
-func (this *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.Node) error {
-	oldPath := this.AbsolutePathForChild(req.OldName)
+func (dir *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.Node) error {
+	oldPath := dir.AbsolutePathForChild(req.OldName)
 	newPath := newDir.(*Dir).AbsolutePathForChild(req.NewName)
-	Info.Println("Rename [", oldPath, "] to ", newPath)
-	err := this.FileSystem.HdfsAccessor.Rename(oldPath, newPath)
+	loginfo("Renaming to "+newPath, Fields{Operation: Rename, Path: oldPath})
+	err := dir.FileSystem.HdfsAccessor.Rename(oldPath, newPath)
 	if err == nil {
 		// Upon successful rename, updating in-memory representation of the file entry
-		if node := this.EntriesGet(req.OldName); node != nil {
+		if node := dir.EntriesGet(req.OldName); node != nil {
 			if fnode, ok := node.(*File); ok {
 				fnode.Attrs.Name = req.NewName
 			} else if dnode, ok := node.(*Dir); ok {
 				dnode.Attrs.Name = req.NewName
 			}
-			this.EntriesRemove(req.OldName)
+			dir.EntriesRemove(req.OldName)
 			newDir.(*Dir).EntriesSet(req.NewName, node)
 		}
 	}
@@ -249,24 +255,24 @@ func (this *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.
 }
 
 // Responds on FUSE Chmod request
-func (this *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
+func (dir *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
 	// Get the filepath, so chmod in hdfs can work
-	path := this.AbsolutePath()
+	path := dir.AbsolutePath()
 	var err error
 
 	if req.Valid.Mode() {
-		Info.Println("Chmod [", path, "] to [", req.Mode, "]")
+		loginfo("Setting attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode})
 		(func() {
-			err = this.FileSystem.HdfsAccessor.Chmod(path, req.Mode)
+			err = dir.FileSystem.HdfsAccessor.Chmod(path, req.Mode)
 			if err != nil {
 				return
 			}
 		})()
 
 		if err != nil {
-			Error.Println("Chmod [", path, "] failed with error: ", err)
+			logerror("Failed to set attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode, Error: err})
 		} else {
-			this.Attrs.Mode = req.Mode
+			dir.Attrs.Mode = req.Mode
 		}
 	}
 
@@ -275,25 +281,26 @@ func (this *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fu
 		owner := fmt.Sprint(req.Uid)
 		group := fmt.Sprint(req.Gid)
 		if err != nil {
-			Error.Println("Chown: username for uid", req.Uid, "not found, use uid/gid instead")
+			logerror(fmt.Sprintf("Chown: username for uid %d not found, use uid/gid instead", req.Uid),
+				Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
 		} else {
 			owner = u.Username
 			group = owner // hardcoded the group same as owner until LookupGroupId available
 		}
 
-		Info.Println("Chown [", path, "] to [", owner, ":", group, "]")
+		loginfo("Setting attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group})
 		(func() {
-			err = this.FileSystem.HdfsAccessor.Chown(path, owner, group)
+			err = dir.FileSystem.HdfsAccessor.Chown(path, owner, group)
 			if err != nil {
 				return
 			}
 		})()
 
 		if err != nil {
-			Error.Println("Chown failed with error:", err)
+			logerror("Failed to set attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
 		} else {
-			this.Attrs.Uid = req.Uid
-			this.Attrs.Gid = req.Gid
+			dir.Attrs.Uid = req.Uid
+			dir.Attrs.Gid = req.Gid
 		}
 	}
 

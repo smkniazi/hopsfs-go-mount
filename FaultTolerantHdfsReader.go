@@ -18,66 +18,65 @@ func NewFaultTolerantHdfsReader(path string, impl ReadSeekCloser, hdfsAccessor H
 }
 
 // Read a chunk of data
-func (this *FaultTolerantHdfsReader) Read(buffer []byte) (int, error) {
-	op := this.RetryPolicy.StartOperation()
+func (ftr *FaultTolerantHdfsReader) Read(buffer []byte) (int, error) {
+	op := ftr.RetryPolicy.StartOperation()
 	for {
 		var err error
-		if this.Impl == nil {
+		if ftr.Impl == nil {
 			// Re-opening the file for read
-			this.Impl, err = this.HdfsAccessor.OpenRead(this.Path)
+			ftr.Impl, err = ftr.HdfsAccessor.OpenRead(ftr.Path)
 			if err != nil {
-				if op.ShouldRetry("[%s] OpenRead: %s", this.Path, err.Error()) {
+				if op.ShouldRetry("[%s] OpenRead: %s", ftr.Path, err.Error()) {
 					continue
 				} else {
 					return 0, err
 				}
 			}
 			// Seeking to the right offset
-			if err = this.Impl.Seek(this.Offset); err != nil {
+			if err = ftr.Impl.Seek(ftr.Offset); err != nil {
 				// Those errors are non-recoverable propagating right away
-				this.Close()
+				ftr.Close()
 				return 0, err
 			}
 		}
 		// Performing the read
 		var nr int
-		nr, err = this.Impl.Read(buffer)
-		if IsSuccessOrBenignError(err) || !op.ShouldRetry("[%s] Read @%d: %s", this.Path, this.Offset, err.Error()) {
+		nr, err = ftr.Impl.Read(buffer)
+		if IsSuccessOrBenignError(err) || !op.ShouldRetry("[%s] Read @%d: %s", ftr.Path, ftr.Offset, err.Error()) {
 			if err == nil {
 				// On successful read, adjusting offset to the actual number of bytes read
-				this.Offset += int64(nr)
+				ftr.Offset += int64(nr)
 			}
 			return nr, err
 		}
 		// On failure, we need to close the reader
-		this.Close()
+		ftr.Close()
 	}
 }
 
 // Seeks to a given position
-func (this *FaultTolerantHdfsReader) Seek(pos int64) error {
+func (ftr *FaultTolerantHdfsReader) Seek(pos int64) error {
 	// Seek is implemented as virtual operation on which doesn't involve communication,
 	// passing that through without retires and promptly propagate errors
 	// (which will be non-recoverable in this case)
-	err := this.Impl.Seek(pos)
+	err := ftr.Impl.Seek(pos)
 	if err == nil {
 		// On success, updating current readng position
-		this.Offset = pos
+		ftr.Offset = pos
 	}
 	return err
 }
 
 // Returns current position
-func (this *FaultTolerantHdfsReader) Position() (int64, error) {
+func (ftr *FaultTolerantHdfsReader) Position() (int64, error) {
 	// This fault-tolerant wrapper keeps track the position on its own, no need
 	// to query the backend
-	return this.Offset, nil
+	return ftr.Offset, nil
 }
 
 // Closes the stream
-func (this *FaultTolerantHdfsReader) Close() error {
-	err := this.Impl.Close()
-	this.Impl = nil
+func (ftr *FaultTolerantHdfsReader) Close() error {
+	err := ftr.Impl.Close()
+	ftr.Impl = nil
 	return err
 }
-

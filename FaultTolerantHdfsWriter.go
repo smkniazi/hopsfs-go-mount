@@ -14,31 +14,31 @@ func NewFaultTolerantHdfsWriter(impl HdfsWriter) HdfsWriter {
 }
 
 // Seeks to a given position
-func (this *FaultTolerantHdfsWriter) Seek(pos int64) error {
+func (ftw *FaultTolerantHdfsWriter) Seek(pos int64) error {
 	// TODO: implement fault tolerance
-	return this.Impl.Seek(pos)
+	return ftw.Impl.Seek(pos)
 }
 
 // Writes chunk of data
-func (this *FaultTolerantHdfsWriter) Write(buffer []byte) (int, error) {
+func (ftw *FaultTolerantHdfsWriter) Write(buffer []byte) (int, error) {
 	// TODO: implement fault tolerance
-	return this.Impl.Write(buffer)
+	return ftw.Impl.Write(buffer)
 }
 
 // Flushes all the data
-func (this *FaultTolerantHdfsWriter) Flush() error {
+func (ftw *FaultTolerantHdfsWriter) Flush() error {
 	// TODO: implement fault tolerance
-	return this.Impl.Flush()
+	return ftw.Impl.Flush()
 }
 
 // Closes the stream
-func (this *FaultTolerantHdfsWriter) Truncate() error {
+func (ftw *FaultTolerantHdfsWriter) Truncate() error {
 	// TODO: implement fault tolerance
-	return this.Impl.Truncate()
+	return ftw.Impl.Truncate()
 }
 
 // Truncate the HDFS file at a given position
-func (this *FaultTolerantHdfsWriter) Close() error {
+func (ftw *FaultTolerantHdfsWriter) Close() error {
 	// TODO: implement fault tolerance
-	return this.Impl.Close()
+	return ftw.Impl.Close()
 }

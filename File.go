@@ -3,14 +3,15 @@
 package main
 
 import (
-	"bazil.org/fuse"
-	"bazil.org/fuse/fs"
 	"fmt"
-	"golang.org/x/net/context"
 	"os/user"
 	"path"
 	"sync"
 	"time"
+
+	"bazil.org/fuse"
+	"bazil.org/fuse/fs"
+	"golang.org/x/net/context"
 )
 
 type File struct {
@@ -20,60 +21,52 @@ type File struct {
 
 	activeHandles      []*FileHandle // list of opened file handles
 	activeHandlesMutex sync.Mutex    // mutex for activeHandles
+	tmpFile            string        // temporary copy of the file
 }
 
 // Verify that *File implements necesary FUSE interfaces
 var _ fs.Node = (*File)(nil)
 var _ fs.NodeOpener = (*File)(nil)
 var _ fs.NodeFsyncer = (*File)(nil)
+var _ fs.NodeSetattrer = (*File)(nil)
 
 // File is also a factory for ReadSeekCloser objects
 var _ ReadSeekCloserFactory = (*File)(nil)
 
-// Retunds absolute path of the file in HDFS namespace
-func (this *File) AbsolutePath() string {
-	return path.Join(this.Parent.AbsolutePath(), this.Attrs.Name)
+// Retuns absolute path of the file in HDFS namespace
+func (file *File) AbsolutePath() string {
+	return path.Join(file.Parent.AbsolutePath(), file.Attrs.Name)
 }
 
 // Responds to the FUSE file attribute request
-func (this *File) Attr(ctx context.Context, a *fuse.Attr) error {
-	if this.FileSystem.Clock.Now().After(this.Attrs.Expires) {
-		err := this.Parent.LookupAttrs(this.Attrs.Name, &this.Attrs)
+func (file *File) Attr(ctx context.Context, a *fuse.Attr) error {
+	if file.FileSystem.Clock.Now().After(file.Attrs.Expires) {
+		err := file.Parent.LookupAttrs(file.Attrs.Name, &file.Attrs)
 		if err != nil {
 			return err
 		}
 	}
-	return this.Attrs.Attr(a)
+	return file.Attrs.Attr(a)
 }
 
 // Responds to the FUSE file open request (creates new file handle)
-func (this *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
-	Info.Println("Open: ", this.AbsolutePath(), req.Flags)
-	handle := NewFileHandle(this)
-	if req.Flags.IsReadOnly() || req.Flags.IsReadWrite() {
-		err := handle.EnableRead()
-		if err != nil {
-			return nil, err
-		}
+func (file *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
+	file.activeHandlesMutex.Lock()
+	defer file.activeHandlesMutex.Unlock()
+
+	logdebug("Opening file", Fields{Operation: Open, Path: file.AbsolutePath(), Flags: req.Flags})
+	handle, err := NewFileHandle(file, true, req.Flags)
+	if err != nil {
+		return nil, err
 	}
 
-	if req.Flags.IsWriteOnly() {
-		// Enabling write only if opened in WriteOnly mode
-		// In Read+Write scenario, write wills be enabled in lazy manner (on first write)
-		newFile := req.Flags.IsWriteOnly() && (req.Flags&fuse.OpenAppend != fuse.OpenAppend)
-		err := handle.EnableWrite(newFile)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	this.AddHandle(handle)
+	file.AddHandle(handle)
 	return handle, nil
 }
 
 // Opens file for reading
-func (this *File) OpenRead() (ReadSeekCloser, error) {
-	handle, err := this.Open(nil, &fuse.OpenRequest{Flags: fuse.OpenReadOnly}, nil)
+func (file *File) OpenRead() (ReadSeekCloser, error) {
+	handle, err := file.Open(nil, &fuse.OpenRequest{Flags: fuse.OpenReadOnly}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -81,38 +74,35 @@ func (this *File) OpenRead() (ReadSeekCloser, error) {
 }
 
 // Registers an opened file handle
-func (this *File) AddHandle(handle *FileHandle) {
-	this.activeHandlesMutex.Lock()
-	defer this.activeHandlesMutex.Unlock()
-	this.activeHandles = append(this.activeHandles, handle)
+func (file *File) AddHandle(handle *FileHandle) {
+	file.activeHandles = append(file.activeHandles, handle)
 }
 
 // Unregisters an opened file handle
-func (this *File) RemoveHandle(handle *FileHandle) {
-	this.activeHandlesMutex.Lock()
-	defer this.activeHandlesMutex.Unlock()
-	for i, h := range this.activeHandles {
+func (file *File) RemoveHandle(handle *FileHandle) {
+	for i, h := range file.activeHandles {
 		if h == handle {
-			this.activeHandles = append(this.activeHandles[:i], this.activeHandles[i+1:]...)
+			file.activeHandles = append(file.activeHandles[:i], file.activeHandles[i+1:]...)
 			break
 		}
 	}
 }
 
 // Returns a snapshot of opened file handles
-func (this *File) GetActiveHandles() []*FileHandle {
-	this.activeHandlesMutex.Lock()
-	defer this.activeHandlesMutex.Unlock()
-	snapshot := make([]*FileHandle, len(this.activeHandles))
-	copy(snapshot, this.activeHandles)
+func (file *File) GetActiveHandles() []*FileHandle {
+	file.activeHandlesMutex.Lock()
+	defer file.activeHandlesMutex.Unlock()
+
+	snapshot := make([]*FileHandle, len(file.activeHandles))
+	copy(snapshot, file.activeHandles)
 	return snapshot
 }
 
 // Responds to the FUSE Fsync request
-func (this *File) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
-	Info.Println("Dispatching fsync request to open handles: ", len(this.GetActiveHandles()))
+func (file *File) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
+	loginfo(fmt.Sprintf("Dispatching fsync request to all open handles: %d", len(file.GetActiveHandles())), Fields{Operation: Fsync})
 	var retErr error
-	for _, handle := range this.GetActiveHandles() {
+	for _, handle := range file.GetActiveHandles() {
 		err := handle.Fsync(ctx, req)
 		if err != nil {
 			retErr = err
@@ -122,29 +112,43 @@ func (this *File) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
 }
 
 // Invalidates metadata cache, so next ls or stat gives up-to-date file attributes
-func (this *File) InvalidateMetadataCache() {
-	this.Attrs.Expires = this.FileSystem.Clock.Now().Add(-1 * time.Second)
+func (file *File) InvalidateMetadataCache() {
+	file.Attrs.Expires = file.FileSystem.Clock.Now().Add(-1 * time.Second)
 }
 
 // Responds on FUSE Chmod request
-func (this *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
+func (file *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
+
+	if req.Valid.Size() {
+		var retErr error
+		for _, handle := range file.GetActiveHandles() {
+			if handle.isWriteable() { // to only write enabled handles
+				err := handle.Truncate(int64(req.Size))
+				if err != nil {
+					retErr = err
+				}
+			}
+		}
+		return retErr
+	}
+
 	// Get the filepath, so chmod in hdfs can work
-	path := this.AbsolutePath()
+	path := file.AbsolutePath()
 	var err error
 
 	if req.Valid.Mode() {
-		Info.Println("Chmod [", path, "] to [", req.Mode, "]")
+		loginfo("Setting attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode})
 		(func() {
-			err = this.FileSystem.HdfsAccessor.Chmod(path, req.Mode)
+			err = file.FileSystem.HdfsAccessor.Chmod(path, req.Mode)
 			if err != nil {
 				return
 			}
 		})()
 
 		if err != nil {
-			Error.Println("Chmod failed with error: ", err)
+			logerror("Failed to set attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode, Error: err})
 		} else {
-			this.Attrs.Mode = req.Mode
+			file.Attrs.Mode = req.Mode
 		}
 	}
 
@@ -153,25 +157,26 @@ func (this *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *f
 		owner := fmt.Sprint(req.Uid)
 		group := fmt.Sprint(req.Gid)
 		if err != nil {
-			Error.Println("Chown: username for uid", req.Uid, "not found, use uid/gid instead")
+			logerror(fmt.Sprintf("Chown: username for uid %d not found, use uid/gid instead", req.Uid),
+				Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
 		} else {
 			owner = u.Username
 			group = owner // hardcoded the group same as owner
 		}
 
-		Info.Println("Chown [", path, "] to [", owner, ":", group, "]")
+		loginfo("Setting attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group})
 		(func() {
-			err = this.FileSystem.HdfsAccessor.Chown(path, fmt.Sprint(req.Uid), fmt.Sprint(req.Gid))
+			err = file.FileSystem.HdfsAccessor.Chown(path, fmt.Sprint(req.Uid), fmt.Sprint(req.Gid))
 			if err != nil {
 				return
 			}
 		})()
 
 		if err != nil {
-			Error.Println("Chown failed with error:", err)
+			logerror("Failed to set attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
 		} else {
-			this.Attrs.Uid = req.Uid
-			this.Attrs.Gid = req.Gid
+			file.Attrs.Uid = req.Uid
+			file.Attrs.Gid = req.Gid
 		}
 	}
 

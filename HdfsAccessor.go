@@ -35,13 +35,21 @@ type HdfsAccessor interface {
 	Close() error                                 // Close current meta connection if needed
 }
 
+type TLSConfig struct {
+	TLS bool // enable/disable using tls
+	// if TLS is set then also set the following parameters
+	RootCABundle      string
+	ClientCertificate string
+	ClientKey         string
+}
+
 type hdfsAccessorImpl struct {
 	Clock               Clock                    // interface to get wall clock time
 	NameNodeAddresses   []string                 // array of Address:port string for the name nodes
 	MetadataClient      *hdfs.Client             // HDFS client used for metadata operations
 	MetadataClientMutex sync.Mutex               // Serializing all metadata operations for simplicity (for now), TODO: allow N concurrent operations
 	UserNameToUidCache  map[string]UidCacheEntry // cache for converting usernames to UIDs
-	tls                 bool                     // enable/disable using tls
+	TLSConfig           TLSConfig                // enable/disable using tls
 }
 
 type UidCacheEntry struct {
@@ -52,14 +60,14 @@ type UidCacheEntry struct {
 var _ HdfsAccessor = (*hdfsAccessorImpl)(nil) // ensure hdfsAccessorImpl implements HdfsAccessor
 
 // Creates an instance of HdfsAccessor
-func NewHdfsAccessor(nameNodeAddresses string, clock Clock, tls bool) (HdfsAccessor, error) {
+func NewHdfsAccessor(nameNodeAddresses string, clock Clock, tlsConfig TLSConfig) (HdfsAccessor, error) {
 	nns := strings.Split(nameNodeAddresses, ",")
 
 	this := &hdfsAccessorImpl{
 		NameNodeAddresses:  nns,
 		Clock:              clock,
 		UserNameToUidCache: make(map[string]UidCacheEntry),
-		tls:                tls,
+		TLSConfig:          tlsConfig,
 	}
 	return this, nil
 }
@@ -95,13 +103,31 @@ func (dfs *hdfsAccessorImpl) ConnectToNameNode() (*hdfs.Client, error) {
 
 // Performs an attempt to connect to the HDFS name
 func (dfs *hdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
+	hadoopUser := os.Getenv("HADOOP_USER_NAME")
+	if hadoopUser == "" {
+		u, err := user.Current()
+		if err != nil {
+			return nil, fmt.Errorf("Couldn't determine user: %s", err)
+		}
+		hadoopUser = u.Username
+	}
+	loginfo(fmt.Sprintf("Connecting as user: %s\n", hadoopUser), nil)
+
 	// Performing an attempt to connect to the name node
 	// Colinmar's hdfs implementation has supported the multiple name node connection
-	client, err := hdfs.NewClient(hdfs.ClientOptions{
+	hdfsOptions := hdfs.ClientOptions{
 		Addresses: dfs.NameNodeAddresses,
-		TLS:       false,
-		User:      os.Getenv("HADOOP_USER_NAME"),
-	})
+		TLS:       dfs.TLSConfig.TLS,
+		User:      hadoopUser,
+	}
+
+	if dfs.TLSConfig.TLS {
+		hdfsOptions.RootCABundle = dfs.TLSConfig.RootCABundle
+		hdfsOptions.ClientKey = dfs.TLSConfig.ClientKey
+		hdfsOptions.ClientCertificate = dfs.TLSConfig.ClientCertificate
+	}
+
+	client, err := hdfs.NewClient(hdfsOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -110,13 +136,14 @@ func (dfs *hdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 	// Performing this check, by doing Stat() for a path inside root directory
 	// Note: The file '/$' doesn't have to be present
 	// - both nil and ErrNotExists error codes indicate success of the operation
-	_, statErr := client.Stat("/$")
+	_, statErr := client.Stat("/")
 
-	if pathError, ok := statErr.(*os.PathError); statErr == nil || ok && (pathError.Err == os.ErrNotExist) {
+	if statErr == nil {
 		// Succesfully connected
 		return client, nil
 	} else {
 		client.Close()
+		logerror(fmt.Sprintf("Faild to connect to NN. Error: %v ", statErr), nil)
 		return nil, statErr
 	}
 }

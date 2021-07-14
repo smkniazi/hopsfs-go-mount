@@ -9,7 +9,7 @@ HOSTNAME=`hostname`
 all: hopsfs-mount 
 
 hopsfs-mount: *.go 
-	go build -ldflags="-w -X main.GITCOMMIT=${GITCOMMIT} -X main.BUILDTIME=${BUILDTIME} -X main.HOSTNAME=${HOSTNAME}" -o hopsfs-mount
+	go build -tags osusergo,netgo -ldflags="-w -X main.GITCOMMIT=${GITCOMMIT} -X main.BUILDTIME=${BUILDTIME} -X main.HOSTNAME=${HOSTNAME}" -o hopsfs-mount
 
 clean:
 	rm -f hopsfs-mount \

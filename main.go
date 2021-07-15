@@ -24,6 +24,9 @@ var Usage = func() {
 
 var stagingDir string
 var logLevel string
+var rootCABundle string
+var clientCertificate string
+var clientKey string
 
 func main() {
 	sigs := make(chan os.Signal, 1)
@@ -40,8 +43,11 @@ func main() {
 	expandZips := flag.Bool("expandZips", false, "Enables automatic expansion of ZIP archives")
 	readOnly := flag.Bool("readOnly", false, "Enables mount with readonly")
 	flag.StringVar(&logLevel, "logLevel", "error", "logs to be printed. error, warn, info, debug, trace")
-	flag.StringVar(&stagingDir, "stageDir", "/var/hdfs-mount", "stage directory for writing file")
+	flag.StringVar(&stagingDir, "stageDir", "/tmp", "stage directory for writing files")
 	tls := flag.Bool("tls", false, "Enables tls connections")
+	flag.StringVar(&rootCABundle, "rootCABundle", "/srv/hops/super_crypto/hdfs/hops_root_ca.pem", "Root CA bundle location ")
+	flag.StringVar(&clientCertificate, "clientCertificate", "/srv/hops/super_crypto/hdfs/hdfs_certificate_bundle.pem", "Client certificate location")
+	flag.StringVar(&clientKey, "clientKey", "/srv/hops/super_crypto/hdfs/hdfs_priv.pem", "Client key location")
 
 	flag.Usage = Usage
 	flag.Parse()
@@ -63,7 +69,14 @@ func main() {
 
 	initLogger(logLevel, os.Stdout, false)
 
-	hdfsAccessor, err := NewHdfsAccessor(flag.Arg(0), WallClock{}, *tls)
+	tlsConfig := TLSConfig{
+		TLS:               *tls,
+		RootCABundle:      rootCABundle,
+		ClientCertificate: clientCertificate,
+		ClientKey:         clientKey,
+	}
+
+	hdfsAccessor, err := NewHdfsAccessor(flag.Arg(0), WallClock{}, tlsConfig)
 	if err != nil {
 		log.Fatal("Error/NewHdfsAccessor: ", err)
 	}

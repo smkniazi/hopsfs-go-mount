@@ -34,6 +34,8 @@ github.com/jcmturner/rpc/v2 v2.0.2 h1:gMB4IwRXYsWw4Bc6o/az2HJgFUA1ffSh90i26ZJ6Xl
 github.com/jcmturner/rpc/v2 v2.0.2/go.mod h1:VUJYCIDm3PVOEHw8sgt091/20OJjskO/YJki3ELg/Hc=
 github.com/logicalclocks/hopsfs-go-client/v2 v2.4.0 h1:QqxW1EZn++PHpduSAm0hjvi3NtGB6hOI40nbMc0DbH8=
 github.com/logicalclocks/hopsfs-go-client/v2 v2.4.0/go.mod h1:r9/8CY9llhxXZcO8p49guubKd1cakd58dQ/5CKQVlL8=
+github.com/logicalclocks/hopsfs-go-client/v2 v2.4.1 h1:Wax6LFsalGW0oozUyImzen3toNkHLQOJIVKB66gvS3E=
+github.com/logicalclocks/hopsfs-go-client/v2 v2.4.1/go.mod h1:r9/8CY9llhxXZcO8p49guubKd1cakd58dQ/5CKQVlL8=
 github.com/pborman/getopt v0.0.0-20180729010549-6fdd0a2c7117/go.mod h1:85jBQOZwpVEaDAr341tbn15RS4fCAsIst0qp7i8ex1o=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=

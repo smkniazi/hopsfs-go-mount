@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	_ "bazil.org/fuse/fs/fstestutil"
 )
@@ -27,40 +28,21 @@ var logLevel string
 var rootCABundle string
 var clientCertificate string
 var clientKey string
+var lazyMount *bool
+var allowedPrefixesString *string
+var expandZips *bool
+var readOnly *bool
+var tls *bool
 
 func main() {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	retryPolicy := NewDefaultRetryPolicy(WallClock{})
 
-	lazyMount := flag.Bool("lazy", false, "Allows to mount HDFS filesystem before HDFS is available")
-	flag.DurationVar(&retryPolicy.TimeLimit, "retryTimeLimit", 5*time.Minute, "time limit for all retry attempts for failed operations")
-	flag.IntVar(&retryPolicy.MaxAttempts, "retryMaxAttempts", 99999999, "Maxumum retry attempts for failed operations")
-	flag.DurationVar(&retryPolicy.MinDelay, "retryMinDelay", 1*time.Second, "minimum delay between retries (note, first retry always happens immediatelly)")
-	flag.DurationVar(&retryPolicy.MaxDelay, "retryMaxDelay", 60*time.Second, "maximum delay between retries")
-	allowedPrefixesString := flag.String("allowedPrefixes", "*", "Comma-separated list of allowed path prefixes on the remote file system, "+
-		"if specified the mount point will expose access to those prefixes only")
-	expandZips := flag.Bool("expandZips", false, "Enables automatic expansion of ZIP archives")
-	readOnly := flag.Bool("readOnly", false, "Enables mount with readonly")
-	flag.StringVar(&logLevel, "logLevel", "error", "logs to be printed. error, warn, info, debug, trace")
-	flag.StringVar(&stagingDir, "stageDir", "/tmp", "stage directory for writing files")
-	tls := flag.Bool("tls", false, "Enables tls connections")
-	flag.StringVar(&rootCABundle, "rootCABundle", "/srv/hops/super_crypto/hdfs/hops_root_ca.pem", "Root CA bundle location ")
-	flag.StringVar(&clientCertificate, "clientCertificate", "/srv/hops/super_crypto/hdfs/hdfs_certificate_bundle.pem", "Client certificate location")
-	flag.StringVar(&clientKey, "clientKey", "/srv/hops/super_crypto/hdfs/hdfs_priv.pem", "Client key location")
-
-	flag.Usage = Usage
-	flag.Parse()
-
-	log.Printf("Staging dir is:%s, Using TLS: %v  \n", stagingDir, *tls)
-
-	if flag.NArg() != 2 {
-		Usage()
-		os.Exit(2)
-	}
-
+	parseArgs(retryPolicy)
+	hopsRpcAddress := flag.Arg(0)
+	mountPoint := flag.Arg(1)
 	createStagingDir()
-
 	log.Print("hdfs-mount: current head GITCommit: ", GITCOMMIT, ", Built time: ", BUILDTIME, ", Built by:", HOSTNAME)
 
 	allowedPrefixes := strings.Split(*allowedPrefixesString, ",")
@@ -76,7 +58,7 @@ func main() {
 		ClientKey:         clientKey,
 	}
 
-	hdfsAccessor, err := NewHdfsAccessor(flag.Arg(0), WallClock{}, tlsConfig)
+	hdfsAccessor, err := NewHdfsAccessor(hopsRpcAddress, WallClock{}, tlsConfig)
 	if err != nil {
 		log.Fatal("Error/NewHdfsAccessor: ", err)
 	}
@@ -89,12 +71,13 @@ func main() {
 	}
 
 	// Creating the virtual file system
-	fileSystem, err := NewFileSystem(ftHdfsAccessor, flag.Arg(1), allowedPrefixes, *expandZips, *readOnly, retryPolicy, WallClock{})
+	fileSystem, err := NewFileSystem(ftHdfsAccessor, allowedPrefixes, *expandZips, *readOnly, retryPolicy, WallClock{})
 	if err != nil {
 		log.Fatal("Error/NewFileSystem: ", err)
 	}
 
-	c, err := fileSystem.Mount()
+	mountOptions := getMountOptions(*readOnly)
+	c, err := fileSystem.Mount(mountPoint, mountOptions...)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -110,7 +93,7 @@ func main() {
 	}
 
 	defer func() {
-		fileSystem.Unmount()
+		fileSystem.Unmount(mountPoint)
 		log.Print("Closing...")
 		c.Close()
 		log.Print("Closed...")
@@ -121,7 +104,7 @@ func main() {
 			//Handling INT/TERM signals - trying to gracefully unmount and exit
 			//TODO: before doing that we need to finish deferred flushes
 			log.Print("Signal received: " + x.String())
-			fileSystem.Unmount() // this will cause Serve() call below to exit
+			fileSystem.Unmount(mountPoint) // this will cause Serve() call below to exit
 			// Also reseting retry policy properties to stop useless retries
 			retryPolicy.MaxAttempts = 0
 			retryPolicy.MaxDelay = 0
@@ -137,6 +120,51 @@ func main() {
 	if err := c.MountError; err != nil {
 		log.Fatal(err)
 	}
+}
+
+func parseArgs(retryPolicy *RetryPolicy) {
+	lazyMount = flag.Bool("lazy", false, "Allows to mount HDFS filesystem before HDFS is available")
+	flag.DurationVar(&retryPolicy.TimeLimit, "retryTimeLimit", 5*time.Minute, "time limit for all retry attempts for failed operations")
+	flag.IntVar(&retryPolicy.MaxAttempts, "retryMaxAttempts", 99999999, "Maxumum retry attempts for failed operations")
+	flag.DurationVar(&retryPolicy.MinDelay, "retryMinDelay", 1*time.Second, "minimum delay between retries (note, first retry always happens immediatelly)")
+	flag.DurationVar(&retryPolicy.MaxDelay, "retryMaxDelay", 60*time.Second, "maximum delay between retries")
+	allowedPrefixesString = flag.String("allowedPrefixes", "*", "Comma-separated list of allowed path prefixes on the remote file system, "+
+		"if specified the mount point will expose access to those prefixes only")
+	expandZips = flag.Bool("expandZips", false, "Enables automatic expansion of ZIP archives")
+	readOnly = flag.Bool("readOnly", false, "Enables mount with readonly")
+	flag.StringVar(&logLevel, "logLevel", "error", "logs to be printed. error, warn, info, debug, trace")
+	flag.StringVar(&stagingDir, "stageDir", "/tmp", "stage directory for writing files")
+	tls = flag.Bool("tls", false, "Enables tls connections")
+	flag.StringVar(&rootCABundle, "rootCABundle", "/srv/hops/super_crypto/hdfs/hops_root_ca.pem", "Root CA bundle location ")
+	flag.StringVar(&clientCertificate, "clientCertificate", "/srv/hops/super_crypto/hdfs/hdfs_certificate_bundle.pem", "Client certificate location")
+	flag.StringVar(&clientKey, "clientKey", "/srv/hops/super_crypto/hdfs/hdfs_priv.pem", "Client key location")
+
+	flag.Usage = Usage
+	flag.Parse()
+
+	log.Printf("Staging dir is:%s, Using TLS: %v  \n", stagingDir, *tls)
+
+	if flag.NArg() != 2 {
+		Usage()
+		os.Exit(2)
+	}
+}
+
+func getMountOptions(ro bool) []fuse.MountOption {
+	mountOptions := []fuse.MountOption{fuse.FSName("hdfs"),
+		fuse.Subtype("hdfs"),
+		fuse.VolumeName("HDFS filesystem"),
+		// fuse.AllowOther(),
+		fuse.WritebackCache(),
+		fuse.MaxReadahead(1024 * 64), //TODO: make configurable
+		fuse.DefaultPermissions(),
+		fuse.AllowSUID(),
+	}
+
+	if ro {
+		mountOptions = append(mountOptions, fuse.ReadOnly())
+	}
+	return mountOptions
 }
 
 func createStagingDir() {

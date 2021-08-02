@@ -3,21 +3,22 @@
 package main
 
 import (
+	"testing"
+
 	"bazil.org/fuse"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 func TestIsPathAllowedForStarPrefix(t *testing.T) {
-	fs, _ := NewFileSystem(nil, "/tmp", []string{"*"}, false, false, NewDefaultRetryPolicy(WallClock{}), WallClock{})
+	fs, _ := NewFileSystem(nil, []string{"*"}, false, false, NewDefaultRetryPolicy(WallClock{}), WallClock{})
 	assert.True(t, fs.IsPathAllowed("/"))
 	assert.True(t, fs.IsPathAllowed("/foo"))
 	assert.True(t, fs.IsPathAllowed("/foo/bar"))
 }
 
 func TestIsPathAllowedForMiscPrefixes(t *testing.T) {
-	fs, _ := NewFileSystem(nil, "/tmp", []string{"foo", "bar", "baz/qux"}, false, false, NewDefaultRetryPolicy(WallClock{}), WallClock{})
+	fs, _ := NewFileSystem(nil, []string{"foo", "bar", "baz/qux"}, false, false, NewDefaultRetryPolicy(WallClock{}), WallClock{})
 	assert.True(t, fs.IsPathAllowed("/"))
 	assert.True(t, fs.IsPathAllowed("/foo"))
 	assert.True(t, fs.IsPathAllowed("/bar"))
@@ -32,7 +33,7 @@ func TestStatfs(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockClock := &MockClock{}
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
-	fs, _ := NewFileSystem(hdfsAccessor, "/tmp/x", []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
+	fs, _ := NewFileSystem(hdfsAccessor, []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
 
 	hdfsAccessor.EXPECT().StatFs().Return(FsInfo{capacity: uint64(10240), remaining: uint64(1024)}, nil)
 	fsInfo := &fuse.StatfsResponse{}

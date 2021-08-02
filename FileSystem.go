@@ -3,6 +3,9 @@
 package main
 
 import (
+	"fmt"
+	"strconv"
+
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 
@@ -12,12 +15,12 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/user"
 	"strings"
 	"sync"
 )
 
 type FileSystem struct {
-	MountPoint      string       // Path to the mount point on a local file system
 	HdfsAccessor    HdfsAccessor // Interface to access HDFS
 	AllowedPrefixes []string     // List of allowed path prefixes (only those prefixes are exposed via mountpoint)
 	ExpandZips      bool         // Indicates whether ZIP expansion feature is enabled
@@ -36,10 +39,9 @@ var _ fs.FS = (*FileSystem)(nil)
 var _ fs.FSStatfser = (*FileSystem)(nil)
 
 // Creates an instance of mountable file system
-func NewFileSystem(hdfsAccessor HdfsAccessor, mountPoint string, allowedPrefixes []string, expandZips bool, readOnly bool, retryPolicy *RetryPolicy, clock Clock) (*FileSystem, error) {
+func NewFileSystem(hdfsAccessor HdfsAccessor, allowedPrefixes []string, expandZips bool, readOnly bool, retryPolicy *RetryPolicy, clock Clock) (*FileSystem, error) {
 	return &FileSystem{
 		HdfsAccessor:    hdfsAccessor,
-		MountPoint:      mountPoint,
 		Mounted:         false,
 		AllowedPrefixes: allowedPrefixes,
 		ExpandZips:      expandZips,
@@ -49,29 +51,13 @@ func NewFileSystem(hdfsAccessor HdfsAccessor, mountPoint string, allowedPrefixes
 }
 
 // Mounts the filesystem
-func (filesystem *FileSystem) Mount() (*fuse.Conn, error) {
+func (filesystem *FileSystem) Mount(mountPoint string, conf ...fuse.MountOption) (*fuse.Conn, error) {
 	var conn *fuse.Conn
 	var err error
-	if filesystem.ReadOnly {
-		conn, err = fuse.Mount(
-			filesystem.MountPoint,
-			fuse.FSName("hdfs"),
-			fuse.Subtype("hdfs"),
-			fuse.VolumeName("HDFS filesystem"),
-			fuse.AllowOther(),
-			fuse.WritebackCache(),
-			fuse.MaxReadahead(1024*64), //TODO: make configurable
-			fuse.ReadOnly())
-	} else {
-		conn, err = fuse.Mount(
-			filesystem.MountPoint,
-			fuse.FSName("hdfs"),
-			fuse.Subtype("hdfs"),
-			fuse.VolumeName("HDFS filesystem"),
-			fuse.AllowOther(),
-			fuse.WritebackCache(),
-			fuse.MaxReadahead(1024*64)) //TODO: make configurable
-	}
+	conn, err = fuse.Mount(
+		mountPoint,
+		conf...,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -80,13 +66,13 @@ func (filesystem *FileSystem) Mount() (*fuse.Conn, error) {
 }
 
 // Unmounts the filesysten (invokes fusermount tool)
-func (filesystem *FileSystem) Unmount() {
+func (filesystem *FileSystem) Unmount(mountPoint string) {
 	if !filesystem.Mounted {
 		return
 	}
 	filesystem.Mounted = false
 	log.Print("Unmounting...")
-	cmd := exec.Command("fusermount", "-zu", filesystem.MountPoint)
+	cmd := exec.Command("fusermount", "-zu", mountPoint)
 	err := cmd.Run()
 
 	// Closing all the files
@@ -103,7 +89,20 @@ func (filesystem *FileSystem) Unmount() {
 
 // Returns root directory of the filesystem
 func (filesystem *FileSystem) Root() (fs.Node, error) {
-	return &Dir{FileSystem: filesystem, Attrs: Attrs{Inode: 1, Name: "", Mode: 0755 | os.ModeDir}}, nil
+	//get UID and GID for the current user
+	cu, err := user.Current()
+	if err != nil {
+		logfatal(fmt.Sprintf("Faile to get current user information. Error: %v", err), nil)
+	}
+	uid64, _ := strconv.ParseUint(cu.Uid, 10, 32)
+	gid64, _ := strconv.ParseUint(cu.Gid, 10, 32)
+
+	return &Dir{FileSystem: filesystem, Attrs: Attrs{
+		Inode: 1,
+		Name:  "",
+		Uid:   uint32(uid64),
+		Gid:   uint32(gid64),
+		Mode:  0755 | os.ModeDir}}, nil
 }
 
 // Returns if given absoute path allowed by any of the prefixes

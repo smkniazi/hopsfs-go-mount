@@ -12,7 +12,6 @@ import (
 	"golang.org/x/net/context"
 
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"os/user"
@@ -22,6 +21,7 @@ import (
 
 type FileSystem struct {
 	HdfsAccessor    HdfsAccessor // Interface to access HDFS
+	SrcDir          string       // Src directory that will mounted
 	AllowedPrefixes []string     // List of allowed path prefixes (only those prefixes are exposed via mountpoint)
 	ExpandZips      bool         // Indicates whether ZIP expansion feature is enabled
 	ReadOnly        bool         // Indicates whether mount filesystem with readonly
@@ -39,7 +39,7 @@ var _ fs.FS = (*FileSystem)(nil)
 var _ fs.FSStatfser = (*FileSystem)(nil)
 
 // Creates an instance of mountable file system
-func NewFileSystem(hdfsAccessor HdfsAccessor, allowedPrefixes []string, expandZips bool, readOnly bool, retryPolicy *RetryPolicy, clock Clock) (*FileSystem, error) {
+func NewFileSystem(hdfsAccessor HdfsAccessor, srcDir string, allowedPrefixes []string, expandZips bool, readOnly bool, retryPolicy *RetryPolicy, clock Clock) (*FileSystem, error) {
 	return &FileSystem{
 		HdfsAccessor:    hdfsAccessor,
 		Mounted:         false,
@@ -47,7 +47,8 @@ func NewFileSystem(hdfsAccessor HdfsAccessor, allowedPrefixes []string, expandZi
 		ExpandZips:      expandZips,
 		ReadOnly:        readOnly,
 		RetryPolicy:     retryPolicy,
-		Clock:           clock}, nil
+		Clock:           clock,
+		SrcDir:          srcDir}, nil
 }
 
 // Mounts the filesystem
@@ -71,7 +72,7 @@ func (filesystem *FileSystem) Unmount(mountPoint string) {
 		return
 	}
 	filesystem.Mounted = false
-	log.Print("Unmounting...")
+	loginfo("Unmounting...", nil)
 	cmd := exec.Command("fusermount", "-zu", mountPoint)
 	err := cmd.Run()
 
@@ -83,7 +84,7 @@ func (filesystem *FileSystem) Unmount(mountPoint string) {
 	}
 
 	if err != nil {
-		log.Fatal(err)
+		logfatal(fmt.Sprintf("Unable to unmount FS. Error: %v", err), nil)
 	}
 }
 
@@ -97,9 +98,8 @@ func (filesystem *FileSystem) Root() (fs.Node, error) {
 	uid64, _ := strconv.ParseUint(cu.Uid, 10, 32)
 	gid64, _ := strconv.ParseUint(cu.Gid, 10, 32)
 
-	return &Dir{FileSystem: filesystem, Attrs: Attrs{
+	return &Dir{FileSystem: filesystem, Parent: nil, Attrs: Attrs{
 		Inode: 1,
-		Name:  "",
 		Uid:   uint32(uid64),
 		Gid:   uint32(gid64),
 		Mode:  0755 | os.ModeDir}}, nil

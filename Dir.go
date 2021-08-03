@@ -36,7 +36,7 @@ var _ fs.NodeRenamer = (*Dir)(nil)
 // Returns absolute path of the dir in HDFS namespace
 func (dir *Dir) AbsolutePath() string {
 	if dir.Parent == nil {
-		return "/"
+		return dir.FileSystem.SrcDir
 	} else {
 		return path.Join(dir.Parent.AbsolutePath(), dir.Attrs.Name)
 	}

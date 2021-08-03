@@ -5,7 +5,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -17,13 +16,8 @@ import (
 	_ "bazil.org/fuse/fs/fstestutil"
 )
 
-var Usage = func() {
-	fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
-	fmt.Fprintf(os.Stderr, "  %s NAMENODE:PORT MOUNTPOINT\n", os.Args[0])
-	flag.PrintDefaults()
-}
-
 var stagingDir string
+var mntSrcDir string
 var logLevel string
 var rootCABundle string
 var clientCertificate string
@@ -43,7 +37,6 @@ func main() {
 	hopsRpcAddress := flag.Arg(0)
 	mountPoint := flag.Arg(1)
 	createStagingDir()
-	log.Print("hdfs-mount: current head GITCommit: ", GITCOMMIT, ", Built time: ", BUILDTIME, ", Built by:", HOSTNAME)
 
 	allowedPrefixes := strings.Split(*allowedPrefixesString, ",")
 
@@ -60,28 +53,35 @@ func main() {
 
 	hdfsAccessor, err := NewHdfsAccessor(hopsRpcAddress, WallClock{}, tlsConfig)
 	if err != nil {
-		log.Fatal("Error/NewHdfsAccessor: ", err)
+		logfatal(fmt.Sprintf("Error/NewHopsFSAccessor: %v ", err), nil)
+	}
+
+	if strings.Compare(mntSrcDir, "/") != 0 {
+		err = checkSrcMountPath(hdfsAccessor)
+		if err != nil {
+			logfatal(fmt.Sprintf("Unable to mount the file system as source mount directory is not accessible. Error: %v ", err), nil)
+		}
 	}
 
 	// Wrapping with FaultTolerantHdfsAccessor
 	ftHdfsAccessor := NewFaultTolerantHdfsAccessor(hdfsAccessor, retryPolicy)
 
 	if !*lazyMount && ftHdfsAccessor.EnsureConnected() != nil {
-		log.Fatal("Can't establish connection to HDFS, mounting will NOT be performend (this can be suppressed with -lazy)")
+		logfatal(fmt.Sprintf("Can't establish connection to HopsFS, mounting will NOT be performend (this can be suppressed with -lazy)"), nil)
 	}
 
 	// Creating the virtual file system
-	fileSystem, err := NewFileSystem(ftHdfsAccessor, allowedPrefixes, *expandZips, *readOnly, retryPolicy, WallClock{})
+	fileSystem, err := NewFileSystem(ftHdfsAccessor, mntSrcDir, allowedPrefixes, *expandZips, *readOnly, retryPolicy, WallClock{})
 	if err != nil {
-		log.Fatal("Error/NewFileSystem: ", err)
+		logfatal(fmt.Sprintf("Error/NewFileSystem: %v ", err), nil)
 	}
 
 	mountOptions := getMountOptions(*readOnly)
 	c, err := fileSystem.Mount(mountPoint, mountOptions...)
 	if err != nil {
-		log.Fatal(err)
+		logfatal(fmt.Sprintf("Failed to mount FS. Error: %v", err), nil)
 	}
-	log.Print("Mounted successfully")
+	loginfo(fmt.Sprintf("Mounted successfully. HopsFS src dir: %s ", mntSrcDir), nil)
 
 	// Increase the maximum number of file descriptor from 1K to 1M in Linux
 	rLimit := syscall.Rlimit{
@@ -94,16 +94,16 @@ func main() {
 
 	defer func() {
 		fileSystem.Unmount(mountPoint)
-		log.Print("Closing...")
+		loginfo("Closing...", nil)
 		c.Close()
-		log.Print("Closed...")
+		loginfo("Closed...", nil)
 	}()
 
 	go func() {
 		for x := range sigs {
 			//Handling INT/TERM signals - trying to gracefully unmount and exit
 			//TODO: before doing that we need to finish deferred flushes
-			log.Print("Signal received: " + x.String())
+			loginfo(fmt.Sprintf("Received signal: %s", x.String()), nil)
 			fileSystem.Unmount(mountPoint) // this will cause Serve() call below to exit
 			// Also reseting retry policy properties to stop useless retries
 			retryPolicy.MaxAttempts = 0
@@ -112,24 +112,30 @@ func main() {
 	}()
 	err = fs.Serve(c, fileSystem)
 	if err != nil {
-		log.Fatal(err)
+		logfatal(fmt.Sprintf("Failed to serve FS. Error: %v", err), nil)
 	}
 
 	// check if the mount process has an error to report
 	<-c.Ready
 	if err := c.MountError; err != nil {
-		log.Fatal(err)
+		logfatal(fmt.Sprintf("Mount process had errors: %v", err), nil)
 	}
 }
 
+var Usage = func() {
+	fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "  %s [Options] Namenode:Port MountPoint\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "  \nOptions:\n")
+	flag.PrintDefaults()
+}
+
 func parseArgs(retryPolicy *RetryPolicy) {
-	lazyMount = flag.Bool("lazy", false, "Allows to mount HDFS filesystem before HDFS is available")
+	lazyMount = flag.Bool("lazy", false, "Allows to mount HopsFS filesystem before HopsFS is available")
 	flag.DurationVar(&retryPolicy.TimeLimit, "retryTimeLimit", 5*time.Minute, "time limit for all retry attempts for failed operations")
 	flag.IntVar(&retryPolicy.MaxAttempts, "retryMaxAttempts", 99999999, "Maxumum retry attempts for failed operations")
 	flag.DurationVar(&retryPolicy.MinDelay, "retryMinDelay", 1*time.Second, "minimum delay between retries (note, first retry always happens immediatelly)")
 	flag.DurationVar(&retryPolicy.MaxDelay, "retryMaxDelay", 60*time.Second, "maximum delay between retries")
-	allowedPrefixesString = flag.String("allowedPrefixes", "*", "Comma-separated list of allowed path prefixes on the remote file system, "+
-		"if specified the mount point will expose access to those prefixes only")
+	allowedPrefixesString = flag.String("allowedPrefixes", "*", "Comma-separated list of allowed path prefixes on the remote file system, if specified the mount point will expose access to those prefixes only")
 	expandZips = flag.Bool("expandZips", false, "Enables automatic expansion of ZIP archives")
 	readOnly = flag.Bool("readOnly", false, "Enables mount with readonly")
 	flag.StringVar(&logLevel, "logLevel", "error", "logs to be printed. error, warn, info, debug, trace")
@@ -138,27 +144,28 @@ func parseArgs(retryPolicy *RetryPolicy) {
 	flag.StringVar(&rootCABundle, "rootCABundle", "/srv/hops/super_crypto/hdfs/hops_root_ca.pem", "Root CA bundle location ")
 	flag.StringVar(&clientCertificate, "clientCertificate", "/srv/hops/super_crypto/hdfs/hdfs_certificate_bundle.pem", "Client certificate location")
 	flag.StringVar(&clientKey, "clientKey", "/srv/hops/super_crypto/hdfs/hdfs_priv.pem", "Client key location")
+	flag.StringVar(&mntSrcDir, "srcDir", "/", "HopsFS src directory")
 
 	flag.Usage = Usage
 	flag.Parse()
-
-	log.Printf("Staging dir is:%s, Using TLS: %v  \n", stagingDir, *tls)
 
 	if flag.NArg() != 2 {
 		Usage()
 		os.Exit(2)
 	}
+
+	loginfo(fmt.Sprintf("Staging dir is:%s, Using TLS: %v", stagingDir, *tls), nil)
+	loginfo(fmt.Sprintf("hopsfs-mount: current head GITCommit: %s Built time: %s Built by: %s ", GITCOMMIT, BUILDTIME, HOSTNAME), nil)
 }
 
 func getMountOptions(ro bool) []fuse.MountOption {
-	mountOptions := []fuse.MountOption{fuse.FSName("hdfs"),
-		fuse.Subtype("hdfs"),
-		fuse.VolumeName("HDFS filesystem"),
-		// fuse.AllowOther(),
+	mountOptions := []fuse.MountOption{fuse.FSName("hopsfs"),
+		fuse.Subtype("hopsfs"),
+		fuse.VolumeName("HopsFS filesystem"),
+		fuse.AllowOther(),
 		fuse.WritebackCache(),
 		fuse.MaxReadahead(1024 * 64), //TODO: make configurable
 		fuse.DefaultPermissions(),
-		fuse.AllowSUID(),
 	}
 
 	if ro {
@@ -171,4 +178,12 @@ func createStagingDir() {
 	if err := os.MkdirAll(stagingDir, 0700); err != nil {
 		logerror(fmt.Sprintf("Failed to create stageDir: %s. Error: %v", stagingDir, err), Fields{})
 	}
+}
+
+func checkSrcMountPath(hdfsAccessor HdfsAccessor) error {
+	_, err := hdfsAccessor.Stat(mntSrcDir)
+	if err != nil {
+		return err
+	}
+	return nil
 }

@@ -116,6 +116,10 @@ func logerror(msg string, f Fields) {
 	logmessae(logger.ErrorLevel, msg, f)
 }
 
+func logfatal(msg string, f Fields) {
+	logmessae(logger.FatalLevel, msg, f)
+}
+
 func logpanic(msg string, f Fields) {
 	logmessae(logger.PanicLevel, msg, f)
 }

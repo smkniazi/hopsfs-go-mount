@@ -20,7 +20,7 @@ func TestReadWriteFile(t *testing.T) {
 	mockClock := &MockClock{}
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
 	fileName := "/testWriteFile_1"
-	fs, _ := NewFileSystem(hdfsAccessor, "/tmp/x", []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
+	fs, _ := NewFileSystem(hdfsAccessor, []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
 
 	hdfswriter := NewMockHdfsWriter(mockCtrl)
 
@@ -59,7 +59,7 @@ func TestFaultTolerantWriteFile(t *testing.T) {
 	mockClock := &MockClock{}
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
 	fileName := "/testWriteFile_1"
-	fs, _ := NewFileSystem(hdfsAccessor, "/tmp/x", []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
+	fs, _ := NewFileSystem(hdfsAccessor, []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
 
 	hdfswriter := NewMockHdfsWriter(mockCtrl)
 
@@ -91,8 +91,8 @@ func TestFaultTolerantWriteFile(t *testing.T) {
 	assert.Equal(t, writeHandle.totalBytesWritten, int64(11))
 
 	binaryData := make([]byte, 65536)
-	writeHandle.handle.Seek(0, 0)
-	nr, _ := writeHandle.handle.Read(binaryData)
+	writeHandle.File.handle.Seek(0, 0)
+	nr, _ := writeHandle.File.handle.Read(binaryData)
 	binaryData = binaryData[:nr]
 
 	// Mock the EOF error to test the fault tolerant write/flush
@@ -138,7 +138,7 @@ func TestFlushFile(t *testing.T) {
 	hdfsAccessor.EXPECT().StatFs().Return(FsInfo{capacity: uint64(100), used: uint64(20), remaining: uint64(80)}, nil).AnyTimes()
 	hdfsAccessor.EXPECT().Stat("/testWriteFile_2").Return(Attrs{Name: "testWriteFile_2"}, nil)
 	fileName := "/testWriteFile_2"
-	fs, _ := NewFileSystem(hdfsAccessor, "/tmp/x", []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
+	fs, _ := NewFileSystem(hdfsAccessor, []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
 
 	hdfsAccessor.EXPECT().Remove(fileName).Return(nil).AnyTimes()
 	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil).AnyTimes()

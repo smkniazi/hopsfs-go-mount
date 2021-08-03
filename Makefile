@@ -13,7 +13,6 @@ hopsfs-mount: *.go
 
 clean:
 	rm -f hopsfs-mount \
-  rm -f mock_*
 
 mock_%_test.go: %.go 
 	mockgen -source $< -package main  -self_package=logicalclocks.com/hopsfs-mount > $@~

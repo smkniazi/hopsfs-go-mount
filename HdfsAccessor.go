@@ -44,16 +44,17 @@ type TLSConfig struct {
 }
 
 type hdfsAccessorImpl struct {
-	Clock               Clock                    // interface to get wall clock time
-	NameNodeAddresses   []string                 // array of Address:port string for the name nodes
-	MetadataClient      *hdfs.Client             // HDFS client used for metadata operations
-	MetadataClientMutex sync.Mutex               // Serializing all metadata operations for simplicity (for now), TODO: allow N concurrent operations
-	UserNameToUidCache  map[string]UidCacheEntry // cache for converting usernames to UIDs
-	TLSConfig           TLSConfig                // enable/disable using tls
+	Clock               Clock                   // interface to get wall clock time
+	NameNodeAddresses   []string                // array of Address:port string for the name nodes
+	MetadataClient      *hdfs.Client            // HDFS client used for metadata operations
+	MetadataClientMutex sync.Mutex              // Serializing all metadata operations for simplicity (for now), TODO: allow N concurrent operations
+	UserNameToUidCache  map[string]UGCacheEntry // cache for converting usernames to UIDs
+	GroupNameToUidCache map[string]UGCacheEntry // cache for converting usernames to UIDs
+	TLSConfig           TLSConfig               // enable/disable using tls
 }
 
-type UidCacheEntry struct {
-	Uid     uint32    // User Id
+type UGCacheEntry struct {
+	ID      uint32    // User/Group Id
 	Expires time.Time // Absolute time when this cache entry expires
 }
 
@@ -64,10 +65,11 @@ func NewHdfsAccessor(nameNodeAddresses string, clock Clock, tlsConfig TLSConfig)
 	nns := strings.Split(nameNodeAddresses, ",")
 
 	this := &hdfsAccessorImpl{
-		NameNodeAddresses:  nns,
-		Clock:              clock,
-		UserNameToUidCache: make(map[string]UidCacheEntry),
-		TLSConfig:          tlsConfig,
+		NameNodeAddresses:   nns,
+		Clock:               clock,
+		UserNameToUidCache:  make(map[string]UGCacheEntry),
+		GroupNameToUidCache: make(map[string]UGCacheEntry),
+		TLSConfig:           tlsConfig,
 	}
 	return this, nil
 }
@@ -275,7 +277,7 @@ func (dfs *hdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 		Mtime:  modificationTime,
 		Ctime:  modificationTime,
 		Crtime: modificationTime,
-		Gid:    0} // TODO: Group is now hardcoded to be "root", implement proper mapping
+		Gid:    dfs.LookupGid(fi.OwnerGroup())}
 }
 
 func (dfs *hdfsAccessorImpl) AttrsFromFsInfo(fsInfo hdfs.FsInfo) FsInfo {
@@ -297,21 +299,58 @@ func (dfs *hdfsAccessorImpl) LookupUid(userName string) uint32 {
 	// Note: this method is called under MetadataClientMutex, so accessing the cache dirctionary is safe
 	cacheEntry, ok := dfs.UserNameToUidCache[userName]
 	if ok && dfs.Clock.Now().Before(cacheEntry.Expires) {
-		return cacheEntry.Uid
+		return cacheEntry.ID
 	}
+
 	u, err := user.Lookup(userName)
-	var uid64 uint64
-	if err == nil {
-		// UID is returned as string, need to parse it
-		uid64, err = strconv.ParseUint(u.Uid, 10, 32)
+	if u != nil {
+		var uid64 uint64
+		if err == nil {
+			// UID is returned as string, need to parse it
+			uid64, err = strconv.ParseUint(u.Uid, 10, 32)
+		}
+		if err != nil {
+			uid64 = (1 << 31) - 1
+		}
+		dfs.UserNameToUidCache[userName] = UGCacheEntry{
+			ID:      uint32(uid64),
+			Expires: dfs.Clock.Now().Add(5 * time.Minute)} // caching UID for 5 minutes
+		return uint32(uid64)
+
+	} else {
+		return 0
 	}
-	if err != nil {
-		uid64 = (1 << 31) - 1
+}
+
+// Performs a cache-assisted lookup of GID by grooupname
+func (dfs *hdfsAccessorImpl) LookupGid(groupName string) uint32 {
+	if groupName == "" {
+		return 0
 	}
-	dfs.UserNameToUidCache[userName] = UidCacheEntry{
-		Uid:     uint32(uid64),
-		Expires: dfs.Clock.Now().Add(5 * time.Minute)} // caching UID for 5 minutes
-	return uint32(uid64)
+	// Note: this method is called under MetadataClientMutex, so accessing the cache dirctionary is safe
+	cacheEntry, ok := dfs.GroupNameToUidCache[groupName]
+	if ok && dfs.Clock.Now().Before(cacheEntry.Expires) {
+		return cacheEntry.ID
+	}
+
+	g, err := user.LookupGroup(groupName)
+	if g != nil {
+		var gid64 uint64
+		if err == nil {
+			// GID is returned as string, need to parse it
+			gid64, err = strconv.ParseUint(g.Gid, 10, 32)
+		}
+		if err != nil {
+			gid64 = (1 << 31) - 1
+		}
+		dfs.GroupNameToUidCache[groupName] = UGCacheEntry{
+			ID:      uint32(gid64),
+			Expires: dfs.Clock.Now().Add(5 * time.Minute)} // caching GID for 5 minutes
+		return uint32(gid64)
+
+	} else {
+		return 0
+	}
 }
 
 // Returns true if err==nil or err is expected (benign) error which should be propagated directoy to the caller

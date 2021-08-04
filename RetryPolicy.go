@@ -67,7 +67,7 @@ func (op *Op) ShouldRetry(message string, args ...interface{}) bool {
 		diag = "exceeded max configured time interval for retries"
 	}
 	if diag != "" {
-		logerror(fmt.Sprintf("Failed all retries. %v ", args), Fields{Operation: RetryingPolicy, Message: message, Retries: op.Attempt, Diag: diag})
+		logerror("Failed all retries.", Fields{Operation: RetryingPolicy, Message: fmt.Sprintf(message, args...), Retries: op.Attempt, Diag: diag})
 		return false
 	}
 	// Computing delay (exponential backoff)
@@ -86,7 +86,7 @@ func (op *Op) ShouldRetry(message string, args ...interface{}) bool {
 	}
 
 	// Logging information about failed attempt
-	logwarn(fmt.Sprintf("Failed try. Retrying %v", args), Fields{Operation: RetryingPolicy, Message: message, Retries: op.Attempt, Delay: effectiveDelay})
+	logwarn("Failed try. Retrying", Fields{Operation: RetryingPolicy, Message: fmt.Sprintf(message, args...), Retries: op.Attempt, Delay: effectiveDelay})
 	op.Attempt++
 
 	// Sleeping

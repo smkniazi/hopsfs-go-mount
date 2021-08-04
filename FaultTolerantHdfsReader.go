@@ -42,7 +42,7 @@ func (ftr *FaultTolerantHdfsReader) Read(buffer []byte) (int, error) {
 		// Performing the read
 		var nr int
 		nr, err = ftr.Impl.Read(buffer)
-		if IsSuccessOrBenignError(err) || !op.ShouldRetry("[%s] Read @%d: %s", ftr.Path, ftr.Offset, err.Error()) {
+		if IsSuccessOrNonRetriableError(err) || !op.ShouldRetry("[%s] Read @%d: %s", ftr.Path, ftr.Offset, err.Error()) {
 			if err == nil {
 				// On successful read, adjusting offset to the actual number of bytes read
 				ftr.Offset += int64(nr)

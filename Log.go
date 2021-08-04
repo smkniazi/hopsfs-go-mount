@@ -4,11 +4,12 @@ package main
 
 import (
 	"fmt"
-	"io"
+	"os"
 	"runtime"
 
 	nested "github.com/antonfisher/nested-logrus-formatter"
 	logger "github.com/sirupsen/logrus"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // bunch of constants for logging
@@ -67,7 +68,7 @@ func init() {
 	logger.SetLevel(logger.ErrorLevel)
 }
 
-func initLogger(l string, out io.Writer, reportCaller bool) {
+func initLogger(l string, reportCaller bool, lfile string) {
 	ReportCaller = reportCaller
 	lvl, err := logger.ParseLevel(l)
 	if err != nil {
@@ -78,10 +79,9 @@ func initLogger(l string, out io.Writer, reportCaller bool) {
 	// Output to stdout instead of the default stderr
 	// Can be any io.Writer, see below for File example
 	// TODO log to file and log cutting
-	logger.SetOutput(out)
 
-	//Json
-	// logger.SetFormatter(&logger.JSONFormatter{})
+	//Json output
+	//logger.SetFormatter(&logger.JSONFormatter{})
 
 	//set custom formatter github.com/antonfisher/nested-logrus-formatter
 	logger.SetFormatter(&nested.Formatter{
@@ -92,6 +92,18 @@ func initLogger(l string, out io.Writer, reportCaller bool) {
 
 	// Only log the warning severity or above.
 	logger.SetLevel(lvl)
+
+	// setup log cutting
+	if lfile != "" {
+		logger.SetOutput(&lumberjack.Logger{
+			Filename:   lfile,
+			MaxSize:    100, // megabytes
+			MaxBackups: 10,
+			MaxAge:     30, //days
+		})
+	} else {
+		logger.SetOutput(os.Stdout)
+	}
 }
 
 type Fields logger.Fields

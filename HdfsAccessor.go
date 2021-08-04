@@ -199,7 +199,7 @@ func (dfs *hdfsAccessorImpl) ReadDir(path string) ([]Attrs, error) {
 	}
 	files, err := dfs.MetadataClient.ReadDir(path)
 	if err != nil {
-		if IsSuccessOrBenignError(err) {
+		if IsSuccessOrNonRetriableError(err) {
 			// benign error (e.g. path not found)
 			return nil, err
 		}
@@ -228,7 +228,7 @@ func (dfs *hdfsAccessorImpl) Stat(path string) (Attrs, error) {
 
 	fileInfo, err := dfs.MetadataClient.Stat(path)
 	if err != nil {
-		if IsSuccessOrBenignError(err) {
+		if IsSuccessOrNonRetriableError(err) {
 			// benign error (e.g. path not found)
 			return Attrs{}, err
 		}
@@ -253,7 +253,7 @@ func (dfs *hdfsAccessorImpl) StatFs() (FsInfo, error) {
 
 	fsInfo, err := dfs.MetadataClient.StatFs()
 	if err != nil {
-		if IsSuccessOrBenignError(err) {
+		if IsSuccessOrNonRetriableError(err) {
 			return FsInfo{}, err
 		}
 		dfs.MetadataClient = nil
@@ -359,7 +359,7 @@ func (dfs *hdfsAccessorImpl) LookupGid(groupName string) uint32 {
 }
 
 // Returns true if err==nil or err is expected (benign) error which should be propagated directoy to the caller
-func IsSuccessOrBenignError(err error) bool {
+func IsSuccessOrNonRetriableError(err error) bool {
 	if err == nil || err == io.EOF || err == fuse.EEXIST {
 		return true
 	}

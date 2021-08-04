@@ -26,7 +26,7 @@ func (fta *FaultTolerantHdfsAccessor) EnsureConnected() error {
 	op := fta.RetryPolicy.StartOperation()
 	for {
 		err := fta.Impl.EnsureConnected()
-		if IsSuccessOrBenignError(err) || !op.ShouldRetry("Connect: %s", err) {
+		if IsSuccessOrNonRetriableError(err) || !op.ShouldRetry("Connect: %s", err) {
 			return err
 		}
 	}
@@ -41,7 +41,7 @@ func (fta *FaultTolerantHdfsAccessor) OpenRead(path string) (ReadSeekCloser, err
 			// wrapping returned HdfsReader with FaultTolerantHdfsReader
 			return NewFaultTolerantHdfsReader(path, result, fta.Impl, fta.RetryPolicy), nil
 		}
-		if IsSuccessOrBenignError(err) || !op.ShouldRetry("[%s] OpenRead: %s", path, err) {
+		if IsSuccessOrNonRetriableError(err) || !op.ShouldRetry("[%s] OpenRead: %s", path, err) {
 			return nil, err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh
@@ -61,7 +61,7 @@ func (fta *FaultTolerantHdfsAccessor) ReadDir(path string) ([]Attrs, error) {
 	op := fta.RetryPolicy.StartOperation()
 	for {
 		result, err := fta.Impl.ReadDir(path)
-		if IsSuccessOrBenignError(err) || !op.ShouldRetry("[%s] ReadDir: %s", path, err) {
+		if IsSuccessOrNonRetriableError(err) || !op.ShouldRetry("[%s] ReadDir: %s", path, err) {
 			return result, err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh
@@ -75,7 +75,7 @@ func (fta *FaultTolerantHdfsAccessor) Stat(path string) (Attrs, error) {
 	op := fta.RetryPolicy.StartOperation()
 	for {
 		result, err := fta.Impl.Stat(path)
-		if IsSuccessOrBenignError(err) || !op.ShouldRetry("[%s] Stat: %s", path, err) {
+		if IsSuccessOrNonRetriableError(err) || !op.ShouldRetry("[%s] Stat: %s", path, err) {
 			return result, err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh
@@ -89,7 +89,7 @@ func (fta *FaultTolerantHdfsAccessor) StatFs() (FsInfo, error) {
 	op := fta.RetryPolicy.StartOperation()
 	for {
 		result, err := fta.Impl.StatFs()
-		if IsSuccessOrBenignError(err) || !op.ShouldRetry("StatFs: %s", err) {
+		if IsSuccessOrNonRetriableError(err) || !op.ShouldRetry("StatFs: %s", err) {
 			return result, err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh
@@ -103,7 +103,7 @@ func (fta *FaultTolerantHdfsAccessor) Mkdir(path string, mode os.FileMode) error
 	op := fta.RetryPolicy.StartOperation()
 	for {
 		err := fta.Impl.Mkdir(path, mode)
-		if IsSuccessOrBenignError(err) || !op.ShouldRetry("[%s] Mkdir %s: %s", path, mode, err) {
+		if IsSuccessOrNonRetriableError(err) || !op.ShouldRetry("[%s] Mkdir %s: %s", path, mode, err) {
 			return err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh
@@ -117,7 +117,7 @@ func (fta *FaultTolerantHdfsAccessor) Remove(path string) error {
 	op := fta.RetryPolicy.StartOperation()
 	for {
 		err := fta.Impl.Remove(path)
-		if IsSuccessOrBenignError(err) || !op.ShouldRetry("[%s] Remove: %s", path, err) {
+		if IsSuccessOrNonRetriableError(err) || !op.ShouldRetry("[%s] Remove: %s", path, err) {
 			return err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh
@@ -131,7 +131,7 @@ func (fta *FaultTolerantHdfsAccessor) Rename(oldPath string, newPath string) err
 	op := fta.RetryPolicy.StartOperation()
 	for {
 		err := fta.Impl.Rename(oldPath, newPath)
-		if IsSuccessOrBenignError(err) || !op.ShouldRetry("[%s] Rename to %s: %s", oldPath, newPath, err) {
+		if IsSuccessOrNonRetriableError(err) || !op.ShouldRetry("[%s] Rename to %s: %s", oldPath, newPath, err) {
 			return err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh
@@ -145,7 +145,7 @@ func (fta *FaultTolerantHdfsAccessor) Chmod(path string, mode os.FileMode) error
 	op := fta.RetryPolicy.StartOperation()
 	for {
 		err := fta.Impl.Chmod(path, mode)
-		if IsSuccessOrBenignError(err) || !op.ShouldRetry("Chmod [%s] to [%d]: %s", path, mode, err) {
+		if IsSuccessOrNonRetriableError(err) || !op.ShouldRetry("Chmod [%s] to [%d]: %s", path, mode, err) {
 			return err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh
@@ -159,7 +159,7 @@ func (fta *FaultTolerantHdfsAccessor) Chown(path string, user, group string) err
 	op := fta.RetryPolicy.StartOperation()
 	for {
 		err := fta.Impl.Chown(path, user, group)
-		if IsSuccessOrBenignError(err) || !op.ShouldRetry("Chown [%s] to [%s:%s]: %s", path, user, group, err) {
+		if IsSuccessOrNonRetriableError(err) || !op.ShouldRetry("Chown [%s] to [%s:%s]: %s", path, user, group, err) {
 			return err
 		} else {
 			// Clean up the bad connection, to let underline connection to get automatic refresh

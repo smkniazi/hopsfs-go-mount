@@ -17,6 +17,10 @@ import (
 	"github.com/colinmarc/hdfs/v2"
 )
 
+const (
+	UGCacheTime = 3 * time.Second
+)
+
 // Interface for accessing HDFS
 // Concurrency: thread safe: handles unlimited number of concurrent requests
 type HdfsAccessor interface {
@@ -113,7 +117,7 @@ func (dfs *hdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 		}
 		hadoopUser = u.Username
 	}
-	loginfo(fmt.Sprintf("Connecting as user: %s\n", hadoopUser), nil)
+	loginfo(fmt.Sprintf("Connecting as user: %s", hadoopUser), nil)
 
 	// Performing an attempt to connect to the name node
 	// Colinmar's hdfs implementation has supported the multiple name node connection
@@ -314,7 +318,7 @@ func (dfs *hdfsAccessorImpl) LookupUid(userName string) uint32 {
 		}
 		dfs.UserNameToUidCache[userName] = UGCacheEntry{
 			ID:      uint32(uid64),
-			Expires: dfs.Clock.Now().Add(5 * time.Minute)} // caching UID for 5 minutes
+			Expires: dfs.Clock.Now().Add(UGCacheTime)}
 		return uint32(uid64)
 
 	} else {
@@ -345,10 +349,11 @@ func (dfs *hdfsAccessorImpl) LookupGid(groupName string) uint32 {
 		}
 		dfs.GroupNameToUidCache[groupName] = UGCacheEntry{
 			ID:      uint32(gid64),
-			Expires: dfs.Clock.Now().Add(5 * time.Minute)} // caching GID for 5 minutes
+			Expires: dfs.Clock.Now().Add(UGCacheTime)}
 		return uint32(gid64)
 
 	} else {
+		logwarn(fmt.Sprintf("Group not found %s", groupName), nil)
 		return 0
 	}
 }

@@ -8,10 +8,12 @@ import (
 	"io/ioutil"
 	"os"
 	"sync"
+	"syscall"
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"golang.org/x/net/context"
+	"golang.org/x/sys/unix"
 )
 
 // Represends a handle to an open file
@@ -103,7 +105,9 @@ func NewFileHandle(file *File, existsInDFS bool, flags fuse.OpenFlags) (*FileHan
 	}
 
 	fh := &FileHandle{File: file, fileFlags: flags}
-	checkDiskSpace(fh.File.FileSystem.HdfsAccessor)
+	if err := checkDiskSpace(); err != nil {
+		return nil, err
+	}
 
 	if err := fh.createStagingFile(operation, existsInDFS); err != nil {
 		return nil, err
@@ -130,17 +134,20 @@ func (fh *FileHandle) Truncate(size int64) error {
 	return nil
 }
 
-func checkDiskSpace(hdfsAccessor HdfsAccessor) error {
-	//TODO FIXME
-	//	fsInfo, err := hdfsAccessor.StatFs()
-	//	if err != nil {
-	//		// Donot abort, continue writing
-	//		Error.Println("Failed to get HDFS usage, ERROR:", err)
-	//	} else if uint64(req.Offset) >= fsInfo.remaining {
-	//		Error.Println("[", fhw.Handle.File.AbsolutePath(), "] writes larger size (", req.Offset, ")than HDFS available size (", fsInfo.remaining, ")")
-	//		return errors.New("Too large file")
-	//	}
-	return nil
+func checkDiskSpace() error {
+	var stat unix.Statfs_t
+	wd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	unix.Statfs(wd, &stat)
+	// Available blocks * size per block = available space in bytes
+	bytesAvailable := stat.Bavail * uint64(stat.Bsize)
+	if bytesAvailable < 64*1024*1024 {
+		return syscall.ENOSPC
+	} else {
+		return nil
+	}
 }
 
 // Returns attributes of the file associated with this handle

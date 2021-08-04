@@ -5,6 +5,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -18,6 +19,7 @@ import (
 
 var stagingDir string
 var mntSrcDir string
+var logFile string
 var logLevel string
 var rootCABundle string
 var clientCertificate string
@@ -29,11 +31,13 @@ var readOnly *bool
 var tls *bool
 
 func main() {
+
+	retryPolicy := NewDefaultRetryPolicy(WallClock{})
+	parseArgsAndInitLogger(retryPolicy)
+
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	retryPolicy := NewDefaultRetryPolicy(WallClock{})
 
-	parseArgs(retryPolicy)
 	hopsRpcAddress := flag.Arg(0)
 	mountPoint := flag.Arg(1)
 	createStagingDir()
@@ -41,8 +45,6 @@ func main() {
 	allowedPrefixes := strings.Split(*allowedPrefixesString, ",")
 
 	retryPolicy.MaxAttempts += 1 // converting # of retry attempts to total # of attempts
-
-	initLogger(logLevel, os.Stdout, false)
 
 	tlsConfig := TLSConfig{
 		TLS:               *tls,
@@ -129,7 +131,7 @@ var Usage = func() {
 	flag.PrintDefaults()
 }
 
-func parseArgs(retryPolicy *RetryPolicy) {
+func parseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	lazyMount = flag.Bool("lazy", false, "Allows to mount HopsFS filesystem before HopsFS is available")
 	flag.DurationVar(&retryPolicy.TimeLimit, "retryTimeLimit", 5*time.Minute, "time limit for all retry attempts for failed operations")
 	flag.IntVar(&retryPolicy.MaxAttempts, "retryMaxAttempts", 99999999, "Maxumum retry attempts for failed operations")
@@ -145,6 +147,7 @@ func parseArgs(retryPolicy *RetryPolicy) {
 	flag.StringVar(&clientCertificate, "clientCertificate", "/srv/hops/super_crypto/hdfs/hdfs_certificate_bundle.pem", "Client certificate location")
 	flag.StringVar(&clientKey, "clientKey", "/srv/hops/super_crypto/hdfs/hdfs_priv.pem", "Client key location")
 	flag.StringVar(&mntSrcDir, "srcDir", "/", "HopsFS src directory")
+	flag.StringVar(&logFile, "logFile", "", "Log file path. By default the log is written to console")
 
 	flag.Usage = Usage
 	flag.Parse()
@@ -154,8 +157,38 @@ func parseArgs(retryPolicy *RetryPolicy) {
 		os.Exit(2)
 	}
 
-	loginfo(fmt.Sprintf("Staging dir is:%s, Using TLS: %v", stagingDir, *tls), nil)
+	if err := checkLogFileCreation(); err != nil {
+		log.Fatalf("Error creating log file. Error: %v", err)
+	}
+	initLogger(logLevel, false, logFile)
+
+	loginfo(fmt.Sprintf("Staging dir is:%s, Using TLS: %v, LogFile: %s", stagingDir, *tls, logFile), nil)
 	loginfo(fmt.Sprintf("hopsfs-mount: current head GITCommit: %s Built time: %s Built by: %s ", GITCOMMIT, BUILDTIME, HOSTNAME), nil)
+}
+
+// check that we can create / open the log file
+func checkLogFileCreation() error {
+	if logFile != "" {
+		if _, err := os.Stat(logFile); err == nil {
+			// file exists. check if it is writeable
+			if f, err := os.OpenFile(logFile, os.O_RDWR|os.O_APPEND, 0600); err != nil {
+				return err
+			} else {
+				f.Close()
+			}
+		} else if os.IsNotExist(err) {
+			// check if we can create the log file
+			if f, err := os.OpenFile(logFile, os.O_RDWR|os.O_CREATE, 0600); err != nil {
+				return err
+			} else {
+				f.Close()
+			}
+		} else {
+			// Schrodinger: file may or may not exist. See err for details.
+			return err
+		}
+	}
+	return nil
 }
 
 func getMountOptions(ro bool) []fuse.MountOption {

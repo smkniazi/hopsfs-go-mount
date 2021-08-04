@@ -202,7 +202,7 @@ func (fh *FileHandle) copyToDFS(operation string) error {
 	op := fh.File.FileSystem.RetryPolicy.StartOperation()
 	for {
 		err := fh.FlushAttempt(operation)
-		if err != io.EOF || IsSuccessOrBenignError(err) || !op.ShouldRetry("Flush()", err) {
+		if err != io.EOF || IsSuccessOrNonRetriableError(err) || !op.ShouldRetry("Flush()", err) {
 			return err
 		}
 		// Reconnect and try again

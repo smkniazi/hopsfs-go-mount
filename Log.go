@@ -80,8 +80,11 @@ func initLogger(l string, out io.Writer, reportCaller bool) {
 	// TODO log to file and log cutting
 	logger.SetOutput(out)
 
-	//Json
-	// logger.SetFormatter(&logger.JSONFormatter{})
+	//sow caller information. Impacts performance
+	//logger.SetReportCaller(true)
+
+	//Json output
+	//logger.SetFormatter(&logger.JSONFormatter{})
 
 	//set custom formatter github.com/antonfisher/nested-logrus-formatter
 	logger.SetFormatter(&nested.Formatter{

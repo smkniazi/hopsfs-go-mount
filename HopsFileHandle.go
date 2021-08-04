@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"os"
 	"sync"
-	"time"
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
@@ -206,14 +205,10 @@ func (fh *FileHandle) copyToDFS(operation string) error {
 		if err != io.EOF || IsSuccessOrBenignError(err) || !op.ShouldRetry("Flush()", err) {
 			return err
 		}
-		// Restart a new connection, https://github.com/colinmarc/hdfs/issues/86
+		// Reconnect and try again
 		fh.File.FileSystem.HdfsAccessor.Close()
 		logwarn("Failed to copy file to DFS", Fields{Operation: operation, Path: fh.File.AbsolutePath()})
-		// Wait for 30 seconds before another retry to get another set of datanodes.
-		// https://community.hortonworks.com/questions/2474/how-to-identify-stale-datanode.html
-		time.Sleep(30 * time.Second)
 	}
-	return nil
 }
 
 func (fh *FileHandle) FlushAttempt(operation string) error {

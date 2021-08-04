@@ -67,7 +67,7 @@ func main() {
 	ftHdfsAccessor := NewFaultTolerantHdfsAccessor(hdfsAccessor, retryPolicy)
 
 	if !*lazyMount && ftHdfsAccessor.EnsureConnected() != nil {
-		logfatal(fmt.Sprintf("Can't establish connection to HopsFS, mounting will NOT be performend (this can be suppressed with -lazy)"), nil)
+		logfatal("Can't establish connection to HopsFS, mounting will NOT be performend (this can be suppressed with -lazy", nil)
 	}
 
 	// Creating the virtual file system

@@ -78,8 +78,6 @@ func TestMountSubDir(t *testing.T) {
 }
 
 func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor HdfsAccessor)) {
-	initLogger("error", false, "")
-
 	hdfsAccessor, err := NewHdfsAccessor("localhost:8020", WallClock{}, TLSConfig{TLS: false})
 	if err != nil {
 		logfatal(fmt.Sprintf("Error/NewHdfsAccessor: %v ", err), nil)

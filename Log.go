@@ -65,7 +65,8 @@ const (
 var ReportCaller = true
 
 func init() {
-	logger.SetLevel(logger.ErrorLevel)
+	initLogger("fatal", false, "")
+	// logger.SetLevel(logger.ErrorLevel)
 }
 
 func initLogger(l string, reportCaller bool, lfile string) {

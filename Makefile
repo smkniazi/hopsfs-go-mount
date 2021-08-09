@@ -24,4 +24,4 @@ mock: hopsfs-mount \
 	mock_HdfsWriter_test.go
 
 test: mock 
-	go test -coverprofile coverage.txt -covermode atomic
+	go test -v -coverprofile coverage.txt -covermode atomic

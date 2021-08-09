@@ -73,7 +73,7 @@ func main() {
 	}
 
 	// Creating the virtual file system
-	fileSystem, err := NewFileSystem(ftHdfsAccessor, mntSrcDir, allowedPrefixes, *expandZips, *readOnly, retryPolicy, WallClock{})
+	fileSystem, err := NewFileSystem(ftHdfsAccessor, mntSrcDir, allowedPrefixes /**expandZips*/, false, *readOnly, retryPolicy, WallClock{})
 	if err != nil {
 		logfatal(fmt.Sprintf("Error/NewFileSystem: %v ", err), nil)
 	}
@@ -138,7 +138,8 @@ func parseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.DurationVar(&retryPolicy.MinDelay, "retryMinDelay", 1*time.Second, "minimum delay between retries (note, first retry always happens immediatelly)")
 	flag.DurationVar(&retryPolicy.MaxDelay, "retryMaxDelay", 60*time.Second, "maximum delay between retries")
 	allowedPrefixesString = flag.String("allowedPrefixes", "*", "Comma-separated list of allowed path prefixes on the remote file system, if specified the mount point will expose access to those prefixes only")
-	expandZips = flag.Bool("expandZips", false, "Enables automatic expansion of ZIP archives")
+	//FIXME automatically expanding zip files is currently broken.
+	// expandZips = flag.Bool("expandZips", false, "Enables automatic expansion of ZIP archives")
 	readOnly = flag.Bool("readOnly", false, "Enables mount with readonly")
 	flag.StringVar(&logLevel, "logLevel", "error", "logs to be printed. error, warn, info, debug, trace")
 	flag.StringVar(&stagingDir, "stageDir", "/tmp", "stage directory for writing files")

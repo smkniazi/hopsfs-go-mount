@@ -20,13 +20,55 @@ func TestSimple(t *testing.T) {
 		//create a file, make sure that use and group information is correct
 		testFile := filepath.Join(mountPoint, "somefile")
 		loginfo(fmt.Sprintf("New file: %s", testFile), nil)
-		createFile(t, testFile)
+		createFile(t, testFile, "some data")
 		fi, _ := os.Stat(testFile)
 		fstat := fi.Sys().(*syscall.Stat_t)
 		grupInfo, _ := user.LookupGroupId(fmt.Sprintf("%d", fstat.Gid))
 		userInfo, _ := user.LookupId(fmt.Sprintf("%d", fstat.Uid))
 		loginfo(fmt.Sprintf("New file: %s, User %s, Gropu %s", testFile, userInfo.Name, grupInfo.Name), nil)
 		os.Remove(testFile)
+	})
+}
+
+// testing multiple read write clients perfile
+func TestMultipleRWCllients(t *testing.T) {
+
+	withMount(t, "/", func(mountPoint string, hdfsAccessor HdfsAccessor) {
+		//create a file, make sure that use and group information is correct
+		// mountPoint = "/tmp"
+		testFile1 := filepath.Join(mountPoint, "somefile")
+		testFile2 := filepath.Join(mountPoint, "somefile.bak")
+		loginfo(fmt.Sprintf("New file: %s", testFile1), nil)
+		createFile(t, testFile1, "initial data\nadsf\n")
+
+		c1, _ := os.OpenFile(testFile1, os.O_RDWR, 0600)
+		c2, _ := os.OpenFile(testFile1, os.O_RDWR, 0600)
+		c3, _ := os.OpenFile(testFile1, os.O_RDWR, 0600)
+
+		c1.WriteString("First client\n")
+		c1.Close()
+
+		os.Rename(testFile1, testFile2)
+
+		c2.WriteString("Second client\nSecond client\n")
+		c3.WriteString("Third client\nThird client\nThird Client\n")
+		c2.Close()
+		c3.Close()
+
+		c5, err := os.Open(testFile2)
+
+		if err != nil {
+			t.Error("The file should have opened successfully")
+		} else {
+			loginfo("File opened successfully", nil)
+			buffer := make([]byte, 1024)
+			c5.Read(buffer)
+			//fmt.Printf("%s", buffer)
+		}
+		c5.Close()
+
+		os.Remove(testFile1)
+		os.Remove(testFile2)
 	})
 }
 
@@ -41,7 +83,7 @@ func TestMountSubDir(t *testing.T) {
 			mkdir(t, dir)
 			for j := 0; j < filesPdir; j++ {
 				f := filepath.Join(dir, "file"+strconv.Itoa(j))
-				createFile(t, f)
+				createFile(t, f, "initial data")
 			}
 		}
 
@@ -57,8 +99,7 @@ func TestMountSubDir(t *testing.T) {
 		if len(content) != filesPdir {
 			t.Errorf("Failed. Expected == %d, Got %d ", filesPdir, len(content))
 			for _, ent := range content {
-				loginfo(fmt.Sprintf("%s", ent.Name()), nil)
-
+				loginfo(fmt.Sprintf("file/dir %s", ent.Name()), nil)
 			}
 		}
 	})
@@ -78,8 +119,6 @@ func TestMountSubDir(t *testing.T) {
 }
 
 func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor HdfsAccessor)) {
-	initLogger("error", false, "")
-
 	hdfsAccessor, err := NewHdfsAccessor("localhost:8020", WallClock{}, TLSConfig{TLS: false})
 	if err != nil {
 		logfatal(fmt.Sprintf("Error/NewHdfsAccessor: %v ", err), nil)
@@ -115,13 +154,13 @@ func mkdir(t testing.TB, dir string) {
 
 }
 
-func createFile(t testing.TB, filePath string) {
+func createFile(t testing.TB, filePath string, data string) {
 	t.Helper()
 	out, err := os.Create(filePath)
 	if err != nil {
 		t.Errorf("Faile to create test file %s. Error: %v", filePath, err)
 	}
-	out.WriteString("This is some test string")
+	out.WriteString(data)
 	out.Close()
 }
 

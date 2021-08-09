@@ -110,34 +110,34 @@ func initLogger(l string, reportCaller bool, lfile string) {
 type Fields logger.Fields
 
 func logtrace(msg string, f Fields) {
-	logmessae(logger.TraceLevel, msg, f)
+	logmessage(logger.TraceLevel, msg, f)
 }
 
 func logdebug(msg string, f Fields) {
-	logmessae(logger.DebugLevel, msg, f)
+	logmessage(logger.DebugLevel, msg, f)
 }
 
 func loginfo(msg string, f Fields) {
-	logmessae(logger.InfoLevel, msg, f)
+	logmessage(logger.InfoLevel, msg, f)
 }
 
 func logwarn(msg string, f Fields) {
-	logmessae(logger.WarnLevel, msg, f)
+	logmessage(logger.WarnLevel, msg, f)
 }
 
 func logerror(msg string, f Fields) {
-	logmessae(logger.ErrorLevel, msg, f)
+	logmessage(logger.ErrorLevel, msg, f)
 }
 
 func logfatal(msg string, f Fields) {
-	logmessae(logger.FatalLevel, msg, f)
+	logmessage(logger.FatalLevel, msg, f)
 }
 
 func logpanic(msg string, f Fields) {
-	logmessae(logger.PanicLevel, msg, f)
+	logmessage(logger.PanicLevel, msg, f)
 }
 
-func logmessae(lvl logger.Level, msg string, f Fields) {
+func logmessage(lvl logger.Level, msg string, f Fields) {
 	if ReportCaller {
 		_, file, line, _ := runtime.Caller(2)
 		if f == nil {

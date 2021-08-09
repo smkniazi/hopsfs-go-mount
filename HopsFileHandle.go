@@ -24,7 +24,7 @@ type FileHandle struct {
 	fileFlags         fuse.OpenFlags // flags used to creat the file
 	tatalBytesRead    int64
 	totalBytesWritten int64
-	FHID              int64 // file handle id. for debugging only
+	fhID              int64 // file handle id. for debugging only
 }
 
 // Verify that *FileHandle implements necesary FUSE interfaces
@@ -106,7 +106,7 @@ func NewFileHandle(file *File, existsInDFS bool, flags fuse.OpenFlags) (*FileHan
 		operation = Open
 	}
 
-	fh := &FileHandle{File: file, fileFlags: flags, FHID: int64(rand.Uint64())}
+	fh := &FileHandle{File: file, fileFlags: flags, fhID: int64(rand.Uint64())}
 	if err := checkDiskSpace(); err != nil {
 		return nil, err
 	}
@@ -315,7 +315,7 @@ func (fh *FileHandle) Release(_ context.Context, _ *fuse.ReleaseRequest) error {
 }
 
 func (fh *FileHandle) logInfo(fields Fields) Fields {
-	f := Fields{FileHandleID: fh.FHID, Path: fh.File.AbsolutePath()}
+	f := Fields{FileHandleID: fh.fhID, Path: fh.File.AbsolutePath()}
 	for k, e := range fields {
 		f[k] = e
 	}

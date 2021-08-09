@@ -60,13 +60,13 @@ const (
 	FileSize          = "file_size"
 	Line              = "line"
 	ReqOffset         = "req_offset"
+	FileHandleID      = "file_handle_id"
 )
 
 var ReportCaller = true
 
 func init() {
 	initLogger("fatal", false, "")
-	// logger.SetLevel(logger.ErrorLevel)
 }
 
 func initLogger(l string, reportCaller bool, lfile string) {

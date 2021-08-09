@@ -18,11 +18,11 @@ import (
 
 // Encapsulates state and operations for directory node on the HDFS file system
 type Dir struct {
-	FileSystem   *FileSystem        // Pointer to the owning filesystem
-	Attrs        Attrs              // Cached attributes of the directory, TODO: add TTL
-	Parent       *Dir               // Pointer to the parent directory (allows computing fully-qualified paths on demand)
-	Entries      map[string]fs.Node // Cahed directory entries
-	EntriesMutex sync.Mutex         // Used to protect Entries
+	FileSystem   *FileSystem         // Pointer to the owning filesystem
+	Attrs        Attrs               // Cached attributes of the directory, TODO: add TTL
+	Parent       *Dir                // Pointer to the parent directory (allows computing fully-qualified paths on demand)
+	Entries      map[string]*fs.Node // Cahed directory entries
+	EntriesMutex sync.Mutex          // Used to protect Entries
 }
 
 // Verify that *Dir implements necesary FUSE interfaces
@@ -63,25 +63,42 @@ func (dir *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
 	return dir.Attrs.Attr(a)
 }
 
-func (dir *Dir) EntriesGet(name string) fs.Node {
+func (dir *Dir) EntriesGet(name string) *fs.Node {
 	dir.EntriesMutex.Lock()
 	defer dir.EntriesMutex.Unlock()
 	if dir.Entries == nil {
-		dir.Entries = make(map[string]fs.Node)
+		dir.Entries = make(map[string]*fs.Node)
 		return nil
 	}
 	return dir.Entries[name]
 }
 
-func (dir *Dir) EntriesSet(name string, node fs.Node) {
+func (dir *Dir) EntriesSet(name string, node *fs.Node) {
 	dir.EntriesMutex.Lock()
 	defer dir.EntriesMutex.Unlock()
 
 	if dir.Entries == nil {
-		dir.Entries = make(map[string]fs.Node)
+		dir.Entries = make(map[string]*fs.Node)
 	}
 
 	dir.Entries[name] = node
+}
+
+func (dir *Dir) EntriesUpdate(name string, attr Attrs) {
+	dir.EntriesMutex.Lock()
+	defer dir.EntriesMutex.Unlock()
+
+	if dir.Entries == nil {
+		dir.Entries = make(map[string]*fs.Node)
+	}
+
+	if node, ok := dir.Entries[name]; ok {
+		if fnode, ok := (*node).(*File); ok {
+			fnode.Attrs = attr
+		} else if dnode, ok := (*node).(*Dir); ok {
+			dnode.Attrs = attr
+		}
+	}
 }
 
 func (dir *Dir) EntriesRemove(name string) {
@@ -99,7 +116,7 @@ func (dir *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	}
 
 	if node := dir.EntriesGet(name); node != nil {
-		return node, nil
+		return *node, nil
 	}
 
 	if dir.FileSystem.ExpandZips && strings.HasSuffix(name, ".zip@") {
@@ -174,7 +191,13 @@ func (dir *Dir) NodeFromAttrs(attrs Attrs) fs.Node {
 	} else {
 		node = &Dir{FileSystem: dir.FileSystem, Parent: dir, Attrs: attrs}
 	}
-	dir.EntriesSet(attrs.Name, node)
+
+	if n := dir.EntriesGet(attrs.Name); n != nil {
+		dir.EntriesUpdate(attrs.Name, attrs)
+	} else {
+		dir.EntriesSet(attrs.Name, &node)
+	}
+
 	return node
 }
 
@@ -242,9 +265,9 @@ func (dir *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.N
 	if err == nil {
 		// Upon successful rename, updating in-memory representation of the file entry
 		if node := dir.EntriesGet(req.OldName); node != nil {
-			if fnode, ok := node.(*File); ok {
+			if fnode, ok := (*node).(*File); ok {
 				fnode.Attrs.Name = req.NewName
-			} else if dnode, ok := node.(*Dir); ok {
+			} else if dnode, ok := (*node).(*Dir); ok {
 				dnode.Attrs.Name = req.NewName
 			}
 			dir.EntriesRemove(req.OldName)

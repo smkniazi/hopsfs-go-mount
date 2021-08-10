@@ -29,6 +29,7 @@ var allowedPrefixesString *string
 var expandZips *bool
 var readOnly *bool
 var tls *bool
+var maxAttempts int
 
 func main() {
 
@@ -44,7 +45,7 @@ func main() {
 
 	allowedPrefixes := strings.Split(*allowedPrefixesString, ",")
 
-	retryPolicy.MaxAttempts += 1 // converting # of retry attempts to total # of attempts
+	retryPolicy.MaxAttempts = maxAttempts
 
 	tlsConfig := TLSConfig{
 		TLS:               *tls,
@@ -134,7 +135,7 @@ var Usage = func() {
 func parseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	lazyMount = flag.Bool("lazy", false, "Allows to mount HopsFS filesystem before HopsFS is available")
 	flag.DurationVar(&retryPolicy.TimeLimit, "retryTimeLimit", 5*time.Minute, "time limit for all retry attempts for failed operations")
-	flag.IntVar(&retryPolicy.MaxAttempts, "retryMaxAttempts", 99999999, "Maxumum retry attempts for failed operations")
+	flag.IntVar(&maxAttempts, "retryMaxAttempts", 10, "Maxumum retry attempts for failed operations")
 	flag.DurationVar(&retryPolicy.MinDelay, "retryMinDelay", 1*time.Second, "minimum delay between retries (note, first retry always happens immediatelly)")
 	flag.DurationVar(&retryPolicy.MaxDelay, "retryMaxDelay", 60*time.Second, "maximum delay between retries")
 	allowedPrefixesString = flag.String("allowedPrefixes", "*", "Comma-separated list of allowed path prefixes on the remote file system, if specified the mount point will expose access to those prefixes only")
@@ -163,7 +164,7 @@ func parseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	}
 	initLogger(logLevel, false, logFile)
 
-	loginfo(fmt.Sprintf("Staging dir is:%s, Using TLS: %v, LogFile: %s", stagingDir, *tls, logFile), nil)
+	loginfo(fmt.Sprintf("Staging dir is:%s, Using TLS: %v, RetryAttempts: %d,  LogFile: %s", stagingDir, *tls, retryPolicy.MaxAttempts, logFile), nil)
 	loginfo(fmt.Sprintf("hopsfs-mount: current head GITCommit: %s Built time: %s Built by: %s ", GITCOMMIT, BUILDTIME, HOSTNAME), nil)
 }
 

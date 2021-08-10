@@ -208,9 +208,6 @@ func (dir *Dir) LookupAttrs(name string, attrs *Attrs) error {
 	if err != nil {
 		// It is a warning as each time new file write tries to stat if the file exists
 		loginfo("Stat failed", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name), Error: err})
-		if pathError, ok := err.(*os.PathError); ok && (pathError.Err == os.ErrNotExist) {
-			return fuse.ENOENT
-		}
 		return err
 	}
 

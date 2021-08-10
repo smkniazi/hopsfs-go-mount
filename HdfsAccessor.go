@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"bazil.org/fuse"
@@ -166,7 +167,7 @@ func (dfs *hdfsAccessorImpl) OpenRead(path string) (ReadSeekCloser, error) {
 	}
 	reader, err := dfs.MetadataClient.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, unwrapAndTranslateError(err)
 	}
 	return NewHdfsReader(reader), nil
 }
@@ -182,7 +183,7 @@ func (dfs *hdfsAccessorImpl) CreateFile(path string, mode os.FileMode, overwrite
 	}
 	writer, err := dfs.MetadataClient.CreateFile(path, 3, 64*1024*1024, mode, overwrite)
 	if err != nil {
-		return nil, err
+		return nil, unwrapAndTranslateError(err)
 	}
 
 	return NewHdfsWriter(writer), nil
@@ -201,12 +202,12 @@ func (dfs *hdfsAccessorImpl) ReadDir(path string) ([]Attrs, error) {
 	if err != nil {
 		if IsSuccessOrNonRetriableError(err) {
 			// benign error (e.g. path not found)
-			return nil, err
+			return nil, unwrapAndTranslateError(err)
 		}
 		// We've got error from this client, setting to nil, so we try another one next time
 		dfs.MetadataClient = nil
 		// TODO: attempt to gracefully close the conenction
-		return nil, err
+		return nil, unwrapAndTranslateError(err)
 	}
 	allAttrs := make([]Attrs, len(files))
 	for i, fileInfo := range files {
@@ -230,12 +231,12 @@ func (dfs *hdfsAccessorImpl) Stat(path string) (Attrs, error) {
 	if err != nil {
 		if IsSuccessOrNonRetriableError(err) {
 			// benign error (e.g. path not found)
-			return Attrs{}, err
+			return Attrs{}, unwrapAndTranslateError(err)
 		}
 		// We've got error from this client, setting to nil, so we try another one next time
 		dfs.MetadataClient = nil
 		// TODO: attempt to gracefully close the conenction
-		return Attrs{}, err
+		return Attrs{}, unwrapAndTranslateError(err)
 	}
 	return dfs.AttrsFromFileInfo(fileInfo), nil
 }
@@ -254,10 +255,10 @@ func (dfs *hdfsAccessorImpl) StatFs() (FsInfo, error) {
 	fsInfo, err := dfs.MetadataClient.StatFs()
 	if err != nil {
 		if IsSuccessOrNonRetriableError(err) {
-			return FsInfo{}, err
+			return FsInfo{}, unwrapAndTranslateError(err)
 		}
 		dfs.MetadataClient = nil
-		return FsInfo{}, err
+		return FsInfo{}, unwrapAndTranslateError(err)
 	}
 	return dfs.AttrsFromFsInfo(fsInfo), nil
 }
@@ -360,10 +361,49 @@ func (dfs *hdfsAccessorImpl) LookupGid(groupName string) uint32 {
 
 // Returns true if err==nil or err is expected (benign) error which should be propagated directoy to the caller
 func IsSuccessOrNonRetriableError(err error) bool {
-	if err == nil || err == io.EOF || err == fuse.EEXIST {
+	if err == nil {
 		return true
 	}
-	if pathError, ok := err.(*os.PathError); ok && (pathError.Err == os.ErrNotExist || pathError.Err == os.ErrPermission) {
+
+	return isNonRetriableError(unwrapAndTranslateError(err))
+}
+
+func unwrapAndTranslateError(err error) error {
+	var e error
+	pathError, ok := err.(*os.PathError)
+	if ok {
+		e = pathError.Err
+	} else {
+		e = err
+	}
+
+	if e == os.ErrNotExist {
+		return syscall.ENOENT
+	}
+	if e == os.ErrPermission {
+		return syscall.EPERM
+	}
+	if e == os.ErrExist {
+		return syscall.EEXIST
+	}
+
+	return e
+}
+
+func isNonRetriableError(err error) bool {
+	if err == io.EOF ||
+		err == fuse.EEXIST ||
+		err == syscall.ENOENT ||
+		err == syscall.EACCES ||
+		err == syscall.ENOTEMPTY ||
+		err == syscall.EEXIST ||
+		err == syscall.EROFS ||
+		err == syscall.EDQUOT ||
+		err == syscall.ENOLINK ||
+		err == os.ErrNotExist ||
+		err == os.ErrPermission ||
+		err == os.ErrExist ||
+		err == os.ErrClosed {
 		return true
 	} else {
 		return false

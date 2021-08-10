@@ -1,40 +1,49 @@
-hdfs-mount
-==========
+What is hopsfs-mount
+====================
 
-[![Build Status](https://travis-ci.org/Microsoft/hdfs-mount.svg?branch=master)](https://travis-ci.org/Microsoft/hdfs-mount)
+Allows to mount remote HopsFS as a local Linux filesystem and allow arbitrary applications / shell scripts to access HopsFS as normal files and directories in efficient and secure way.
 
-Allows to mount remote HDFS as a local Linux filesystem and allow arbitrary applications / shell scripts to access HDFS as normal files and directories in efficient and secure way.
+Usage 
+-----
 
-Features (Planned)
-------------------
-* High performance
-   * directly interfacing Linux kernel for FUSE and HDFS using protocol buffers (requires no JavaVM)
-   * designed and optimized for throughput-intensive workloads (throughput is traded for latency whenever possible)
-   * full streaming and automatic read-ahead support
-   * concurrent operations
-   * In-memory metadata caching (very fast ls!)
-* High stability and robust failure-handling behavior
-   * automatic retries and failover, all configurable
-   * optional lazy mounting, before HDFS becomes available
-* Support for both reads and writes
-  * support for random writes [slow, but functionally correct]
-  * support for file truncations
-* Optionally expands ZIP archives with extracting content on demand
-  * this provides an effective solution to "millions of small files on HDFS" problem
-* CoreOS and Docker-friendly
-  * optionally packagable as a statically-linked self-contained executable
+```
+Usage of ./hopsfs-mount:
+  ./hopsfs-mount [Options] Namenode:Port MountPoint
 
-Current state
--------------
-"Alpha", under active development. Basic R/O scenarios, key R/O throughout optimizations and ZIP support are implemented and outperform existing HDFS/FUSE solutions.
-If you want to use the component - come back in few weeks
-If you want to help - contact authors
-
-Building
---------
-Ensure that you cloned the git repository recursively, since it contains submodules.
-Run 'make' to build and 'make test' to run unit test.
-Please use Go version at least 1.6beta2. This version contains bugfix for handling zip64 archives necessary for hdfs-mount to operate normally.
+Options:
+  -allowedPrefixes string
+        Comma-separated list of allowed path prefixes on the remote file system, if specified the mount point will expose access to those prefixes only (default "*")
+  -clientCertificate string
+        Client certificate location (default "/srv/hops/super_crypto/hdfs/hdfs_certificate_bundle.pem")
+  -clientKey string
+        Client key location (default "/srv/hops/super_crypto/hdfs/hdfs_priv.pem")
+  -fuse.debug
+        log FUSE processing details
+  -lazy
+        Allows to mount HopsFS filesystem before HopsFS is available
+  -logFile string
+        Log file path. By default the log is written to console
+  -logLevel string
+        logs to be printed. error, warn, info, debug, trace (default "error")
+  -readOnly
+        Enables mount with readonly
+  -retryMaxAttempts int
+        Maxumum retry attempts for failed operations (default 10)
+  -retryMaxDelay duration
+        maximum delay between retries (default 1m0s)
+  -retryMinDelay duration
+        minimum delay between retries (note, first retry always happens immediatelly) (default 1s)
+  -retryTimeLimit duration
+        time limit for all retry attempts for failed operations (default 5m0s)
+  -rootCABundle string
+        Root CA bundle location  (default "/srv/hops/super_crypto/hdfs/hops_root_ca.pem")
+  -srcDir string
+        HopsFS src directory (default "/")
+  -stageDir string
+        stage directory for writing files (default "/tmp")
+  -tls
+        Enables tls connections
+```
 
 Other Platforms
 ---------------

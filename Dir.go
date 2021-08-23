@@ -18,11 +18,11 @@ import (
 
 // Encapsulates state and operations for directory node on the HDFS file system
 type Dir struct {
-	FileSystem   *FileSystem         // Pointer to the owning filesystem
-	Attrs        Attrs               // Cached attributes of the directory, TODO: add TTL
-	Parent       *Dir                // Pointer to the parent directory (allows computing fully-qualified paths on demand)
-	Entries      map[string]*fs.Node // Cahed directory entries
-	EntriesMutex sync.Mutex          // Used to protect Entries
+	FileSystem *FileSystem         // Pointer to the owning filesystem
+	Attrs      Attrs               // Cached attributes of the directory, TODO: add TTL
+	Parent     *Dir                // Pointer to the parent directory (allows computing fully-qualified paths on demand)
+	Entries    map[string]*fs.Node // Cahed directory entries
+	mutex      sync.Mutex          // One read or write operation on a directory at a time
 }
 
 // Verify that *Dir implements necesary FUSE interfaces
@@ -53,6 +53,8 @@ func (dir *Dir) AbsolutePathForChild(name string) string {
 
 // Responds on FUSE request to get directory attributes
 func (dir *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
+	dir.mutex.Lock()
+	defer dir.mutex.Unlock()
 	if dir.Parent != nil && dir.FileSystem.Clock.Now().After(dir.Attrs.Expires) {
 		err := dir.Parent.LookupAttrs(dir.Attrs.Name, &dir.Attrs)
 		if err != nil {
@@ -64,8 +66,6 @@ func (dir *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
 }
 
 func (dir *Dir) EntriesGet(name string) *fs.Node {
-	dir.EntriesMutex.Lock()
-	defer dir.EntriesMutex.Unlock()
 	if dir.Entries == nil {
 		dir.Entries = make(map[string]*fs.Node)
 		return nil
@@ -74,9 +74,6 @@ func (dir *Dir) EntriesGet(name string) *fs.Node {
 }
 
 func (dir *Dir) EntriesSet(name string, node *fs.Node) {
-	dir.EntriesMutex.Lock()
-	defer dir.EntriesMutex.Unlock()
-
 	if dir.Entries == nil {
 		dir.Entries = make(map[string]*fs.Node)
 	}
@@ -85,9 +82,6 @@ func (dir *Dir) EntriesSet(name string, node *fs.Node) {
 }
 
 func (dir *Dir) EntriesUpdate(name string, attr Attrs) {
-	dir.EntriesMutex.Lock()
-	defer dir.EntriesMutex.Unlock()
-
 	if dir.Entries == nil {
 		dir.Entries = make(map[string]*fs.Node)
 	}
@@ -102,8 +96,6 @@ func (dir *Dir) EntriesUpdate(name string, attr Attrs) {
 }
 
 func (dir *Dir) EntriesRemove(name string) {
-	dir.EntriesMutex.Lock()
-	defer dir.EntriesMutex.Unlock()
 	if dir.Entries != nil {
 		delete(dir.Entries, name)
 	}
@@ -111,6 +103,9 @@ func (dir *Dir) EntriesRemove(name string) {
 
 // Responds on FUSE request to lookup the directory
 func (dir *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
+	dir.mutex.Lock()
+	defer dir.mutex.Unlock()
+
 	if !dir.FileSystem.IsPathAllowed(dir.AbsolutePathForChild(name)) {
 		return nil, fuse.ENOENT
 	}
@@ -147,6 +142,9 @@ func (dir *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 
 // Responds on FUSE request to read directory
 func (dir *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
+	dir.mutex.Lock()
+	defer dir.mutex.Unlock()
+
 	absolutePath := dir.AbsolutePath()
 	loginfo("Read directory", Fields{Operation: ReadDir, Path: absolutePath})
 
@@ -203,6 +201,7 @@ func (dir *Dir) NodeFromAttrs(attrs Attrs) fs.Node {
 
 // Performs Stat() query on the backend
 func (dir *Dir) LookupAttrs(name string, attrs *Attrs) error {
+
 	var err error
 	*attrs, err = dir.FileSystem.HdfsAccessor.Stat(path.Join(dir.AbsolutePath(), name))
 	if err != nil {
@@ -219,6 +218,9 @@ func (dir *Dir) LookupAttrs(name string, attrs *Attrs) error {
 
 // Responds on FUSE Mkdir request
 func (dir *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, error) {
+	dir.mutex.Lock()
+	defer dir.mutex.Unlock()
+
 	err := dir.FileSystem.HdfsAccessor.Mkdir(dir.AbsolutePathForChild(req.Name), req.Mode)
 	if err != nil {
 		return nil, err
@@ -228,12 +230,15 @@ func (dir *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, err
 
 // Responds on FUSE Create request
 func (dir *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
-	loginfo("Creating a new file", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags})
+	dir.mutex.Lock()
+	defer dir.mutex.Unlock()
 
+	loginfo("Creating a new file", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags})
 	file := dir.NodeFromAttrs(Attrs{Name: req.Name, Mode: req.Mode}).(*File)
 	handle, err := NewFileHandle(file, false, req.Flags)
 	if err != nil {
 		logerror("File creation failed", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags, Error: err})
+		//TODO remove the entry from the cache
 		return nil, nil, err
 	}
 	file.AddHandle(handle)
@@ -242,6 +247,9 @@ func (dir *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.
 
 // Responds on FUSE Remove request
 func (dir *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
+	dir.mutex.Lock()
+	defer dir.mutex.Unlock()
+
 	path := dir.AbsolutePathForChild(req.Name)
 	loginfo("Removing path", Fields{Operation: Remove, Path: path})
 	err := dir.FileSystem.HdfsAccessor.Remove(path)
@@ -255,6 +263,9 @@ func (dir *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 
 // Responds on FUSE Rename request
 func (dir *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.Node) error {
+	dir.mutex.Lock()
+	defer dir.mutex.Unlock()
+
 	oldPath := dir.AbsolutePathForChild(req.OldName)
 	newPath := newDir.(*Dir).AbsolutePathForChild(req.NewName)
 	loginfo("Renaming to "+newPath, Fields{Operation: Rename, Path: oldPath})
@@ -276,6 +287,9 @@ func (dir *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.N
 
 // Responds on FUSE Chmod request
 func (dir *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
+	dir.mutex.Lock()
+	defer dir.mutex.Unlock()
+
 	// Get the filepath, so chmod in hdfs can work
 	path := dir.AbsolutePath()
 	var err error

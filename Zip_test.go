@@ -51,7 +51,7 @@ func TestZipDirReadArchive(t *testing.T) {
 	hdfsAccessor.EXPECT().Stat("/test.zip").Return(Attrs{Name: "test.zip", Size: uint64(zipFileInfo.Size()), Uid: uint32(500), Gid: uint32(500)}, nil).AnyTimes()
 	hdfsAccessor.EXPECT().OpenRead("/test.zip").Return(ReadSeekCloser(&FileAsReadSeekCloser{File: zipFile}), err).AnyTimes()
 	root, err := fs.Root()
-	zipRootDirNode, err := root.(*Dir).Lookup(nil, "test.zip@")
+	zipRootDirNode, err := root.(*DirINode).Lookup(nil, "test.zip@")
 	assert.Nil(t, err)
 	zipRootDir := zipRootDirNode.(*ZipDir)
 

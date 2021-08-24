@@ -30,7 +30,7 @@ func TestReadWriteFile(t *testing.T) {
 	hdfswriter.EXPECT().Close().Return(nil).AnyTimes()
 
 	root, _ := fs.Root()
-	_, h, err := root.(*Dir).Create(nil, &fuse.CreateRequest{Name: fileName,
+	_, h, err := root.(*DirINode).Create(nil, &fuse.CreateRequest{Name: fileName,
 		Flags: fuse.OpenReadWrite | fuse.OpenCreate, Mode: os.FileMode(0757)}, &fuse.CreateResponse{})
 
 	// file := root.(*Dir).NodeFromAttrs(Attrs{Name: fileName, Mode: os.FileMode(0757)}).(*File)
@@ -76,7 +76,7 @@ func TestFaultTolerantWriteFile(t *testing.T) {
 	}).AnyTimes()
 
 	root, _ := fs.Root()
-	_, h, err := root.(*Dir).Create(nil, &fuse.CreateRequest{Name: fileName,
+	_, h, err := root.(*DirINode).Create(nil, &fuse.CreateRequest{Name: fileName,
 		Flags: fuse.OpenReadWrite | fuse.OpenCreate, Mode: os.FileMode(0757)}, &fuse.CreateResponse{})
 
 	// Test for newfilehandlewriter
@@ -146,7 +146,7 @@ func TestFlushFile(t *testing.T) {
 
 	// Test for newfilehandlewriter with existing file
 	root, _ := fs.Root()
-	file := root.(*Dir).NodeFromAttrs(Attrs{Name: "testWriteFile_2"}).(*File)
+	file := root.(*DirINode).NodeFromAttrs(Attrs{Name: "testWriteFile_2"}).(*FileINode)
 	fh, _ := file.Open(nil, &fuse.OpenRequest{}, &fuse.OpenResponse{})
 	fileHandle := fh.(*FileHandle)
 

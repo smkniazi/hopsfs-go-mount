@@ -19,7 +19,7 @@ import (
 
 // Represends a handle to an open file
 type FileHandle struct {
-	File              *File
+	File              *FileINode
 	Mutex             sync.Mutex     // all operations on the handle are serialized to simplify invariants
 	fileFlags         fuse.OpenFlags // flags used to creat the file
 	tatalBytesRead    int64
@@ -99,7 +99,7 @@ func (fh *FileHandle) downloadToStaging(stagingFile *os.File, operation string) 
 }
 
 // Creates new file handle
-func NewFileHandle(file *File, existsInDFS bool, flags fuse.OpenFlags) (*FileHandle, error) {
+func NewFileHandle(file *FileINode, existsInDFS bool, flags fuse.OpenFlags) (*FileHandle, error) {
 
 	operation := Create
 	if existsInDFS {

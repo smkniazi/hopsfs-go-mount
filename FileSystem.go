@@ -98,7 +98,7 @@ func (filesystem *FileSystem) Root() (fs.Node, error) {
 	uid64, _ := strconv.ParseUint(cu.Uid, 10, 32)
 	gid64, _ := strconv.ParseUint(cu.Gid, 10, 32)
 
-	return &Dir{FileSystem: filesystem, Parent: nil, Attrs: Attrs{
+	return &DirINode{FileSystem: filesystem, Parent: nil, Attrs: Attrs{
 		Inode: 1,
 		Uid:   uint32(uid64),
 		Gid:   uint32(gid64),

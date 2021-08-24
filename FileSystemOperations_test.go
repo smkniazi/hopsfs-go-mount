@@ -148,19 +148,22 @@ func TestGitClone(t *testing.T) {
 }
 
 func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor HdfsAccessor)) {
-	hdfsAccessor, err := NewHdfsAccessor("localhost:8020", WallClock{}, TLSConfig{TLS: false})
+	t.Helper()
+	hdfsAccessor, _ := NewHdfsAccessor("localhost:8020", WallClock{}, TLSConfig{TLS: false})
+	err := hdfsAccessor.EnsureConnected()
 	if err != nil {
-		logfatal(fmt.Sprintf("Error/NewHdfsAccessor: %v ", err), nil)
+		t.Fatalf(fmt.Sprintf("Error/NewHdfsAccessor: %v ", err), nil)
 	}
 
 	// Wrapping with FaultTolerantHdfsAccessor
 	retryPolicy := NewDefaultRetryPolicy(WallClock{})
+	retryPolicy.MaxAttempts = 1 // for quick failure
 	ftHdfsAccessor := NewFaultTolerantHdfsAccessor(hdfsAccessor, retryPolicy)
 
 	// Creating the virtual file system
 	fileSystem, err := NewFileSystem(ftHdfsAccessor, srcDir, []string{"*"}, false, false, retryPolicy, WallClock{})
 	if err != nil {
-		logfatal(fmt.Sprintf("Error/NewFileSystem: %v ", err), nil)
+		t.Fatalf(fmt.Sprintf("Error/NewFileSystem: %v ", err), nil)
 	}
 
 	mountOptions := getMountOptions(false)

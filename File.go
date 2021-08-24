@@ -15,10 +15,10 @@ import (
 	"golang.org/x/net/context"
 )
 
-type File struct {
+type FileINode struct {
 	FileSystem *FileSystem // pointer to the FieSystem which owns this file
 	Attrs      Attrs       // Cache of file attributes // TODO: implement TTL
-	Parent     *Dir        // Pointer to the parent directory (allows computing fully-qualified paths on demand)
+	Parent     *DirINode   // Pointer to the parent directory (allows computing fully-qualified paths on demand)
 
 	activeHandles []*FileHandle // list of opened file handles
 	fileMutex     sync.Mutex    // mutex for activeHandles
@@ -26,21 +26,21 @@ type File struct {
 }
 
 // Verify that *File implements necesary FUSE interfaces
-var _ fs.Node = (*File)(nil)
-var _ fs.NodeOpener = (*File)(nil)
-var _ fs.NodeFsyncer = (*File)(nil)
-var _ fs.NodeSetattrer = (*File)(nil)
+var _ fs.Node = (*FileINode)(nil)
+var _ fs.NodeOpener = (*FileINode)(nil)
+var _ fs.NodeFsyncer = (*FileINode)(nil)
+var _ fs.NodeSetattrer = (*FileINode)(nil)
 
 // File is also a factory for ReadSeekCloser objects
-var _ ReadSeekCloserFactory = (*File)(nil)
+var _ ReadSeekCloserFactory = (*FileINode)(nil)
 
 // Retuns absolute path of the file in HDFS namespace
-func (file *File) AbsolutePath() string {
+func (file *FileINode) AbsolutePath() string {
 	return path.Join(file.Parent.AbsolutePath(), file.Attrs.Name)
 }
 
 // Responds to the FUSE file attribute request
-func (file *File) Attr(ctx context.Context, a *fuse.Attr) error {
+func (file *FileINode) Attr(ctx context.Context, a *fuse.Attr) error {
 	if file.FileSystem.Clock.Now().After(file.Attrs.Expires) {
 		err := file.Parent.LookupAttrs(file.Attrs.Name, &file.Attrs)
 		if err != nil {
@@ -51,7 +51,7 @@ func (file *File) Attr(ctx context.Context, a *fuse.Attr) error {
 }
 
 // Responds to the FUSE file open request (creates new file handle)
-func (file *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
+func (file *FileINode) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
 	file.fileMutex.Lock()
 	defer file.fileMutex.Unlock()
 
@@ -66,7 +66,7 @@ func (file *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.Op
 }
 
 // Opens file for reading
-func (file *File) OpenRead() (ReadSeekCloser, error) {
+func (file *FileINode) OpenRead() (ReadSeekCloser, error) {
 	file.fileMutex.Lock()
 	defer file.fileMutex.Unlock()
 	handle, err := file.Open(nil, &fuse.OpenRequest{Flags: fuse.OpenReadOnly}, nil)
@@ -77,12 +77,12 @@ func (file *File) OpenRead() (ReadSeekCloser, error) {
 }
 
 // Registers an opened file handle
-func (file *File) AddHandle(handle *FileHandle) {
+func (file *FileINode) AddHandle(handle *FileHandle) {
 	file.activeHandles = append(file.activeHandles, handle)
 }
 
 // Unregisters an opened file handle
-func (file *File) RemoveHandle(handle *FileHandle) {
+func (file *FileINode) RemoveHandle(handle *FileHandle) {
 	for i, h := range file.activeHandles {
 		if h == handle {
 			file.activeHandles = append(file.activeHandles[:i], file.activeHandles[i+1:]...)
@@ -92,7 +92,7 @@ func (file *File) RemoveHandle(handle *FileHandle) {
 }
 
 // Responds to the FUSE Fsync request
-func (file *File) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
+func (file *FileINode) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
 	loginfo(fmt.Sprintf("Dispatching fsync request to all open handles: %d", len(file.activeHandles)), Fields{Operation: Fsync})
 	var retErr error
 	for _, handle := range file.activeHandles {
@@ -105,12 +105,12 @@ func (file *File) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
 }
 
 // Invalidates metadata cache, so next ls or stat gives up-to-date file attributes
-func (file *File) InvalidateMetadataCache() {
+func (file *FileINode) InvalidateMetadataCache() {
 	file.Attrs.Expires = file.FileSystem.Clock.Now().Add(-1 * time.Second)
 }
 
 // Responds on FUSE Chmod request
-func (file *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
+func (file *FileINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
 	file.fileMutex.Lock()
 	defer file.fileMutex.Unlock()
 
@@ -178,6 +178,6 @@ func (file *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *f
 	return err
 }
 
-func (file *File) countActiveHandles() int {
+func (file *FileINode) countActiveHandles() int {
 	return len(file.activeHandles)
 }

@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"strconv"
@@ -111,9 +112,37 @@ func TestMountSubDir(t *testing.T) {
 			dir := filepath.Join(mountPoint, "dir"+strconv.Itoa(i))
 			for j := 0; j < filesPdir; j++ {
 				f := filepath.Join(dir, "file"+strconv.Itoa(j))
-				rm(t, f)
+				rmFile(t, f)
 			}
-			rm(t, dir)
+			rmFile(t, dir)
+		}
+	})
+}
+
+func TestGitClone(t *testing.T) {
+	withMount(t, "/", func(mountPoint string, hdfsAccessor HdfsAccessor) {
+
+		cloneDir := "cloneDir"
+		fullPath := filepath.Join(mountPoint, cloneDir)
+
+		//delete the dir if it already exists
+		_, err := os.Stat(fullPath)
+		if os.IsExist(err) {
+			err := rmDir(t, fullPath)
+			if err != nil {
+				t.Errorf("Faile to remove  %s. Error: %v", fullPath, err)
+			}
+		}
+
+		_, err = exec.Command("git", "clone", "https://github.com/logicalclocks/ndb-chef", fullPath).Output()
+		if err != nil {
+			t.Errorf("Unable to clone the repo. Error: %v", err)
+		}
+
+		//clean
+		err = rmDir(t, fullPath)
+		if err != nil {
+			t.Errorf("Faile to remove  %s. Error: %v", fullPath, err)
 		}
 	})
 }
@@ -173,10 +202,38 @@ func listDir(t testing.TB, dir string) []fs.FileInfo {
 	return content
 }
 
-func rm(t testing.TB, path string) {
+func rmFile(t testing.TB, path string) {
 	t.Helper()
 	err := os.Remove(path)
 	if err != nil {
 		t.Errorf("Faile to remove  %s. Error: %v", path, err)
 	}
+}
+
+func rmDir(t testing.TB, dir string) error {
+	t.Helper()
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+
+	names, err := d.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+
+	for _, name := range names {
+		err = os.RemoveAll(filepath.Join(dir, name))
+		if err != nil {
+			return err
+		}
+	}
+
+	err = os.Remove(dir)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

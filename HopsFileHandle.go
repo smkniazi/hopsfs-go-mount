@@ -3,18 +3,12 @@
 package main
 
 import (
-	"fmt"
 	"io"
-	"io/ioutil"
-	"math/rand"
-	"os"
 	"sync"
-	"syscall"
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"golang.org/x/net/context"
-	"golang.org/x/sys/unix"
 )
 
 // Represends a handle to an open file
@@ -35,90 +29,6 @@ var _ fs.HandleWriter = (*FileHandle)(nil)
 var _ fs.NodeFsyncer = (*FileHandle)(nil)
 var _ fs.HandleFlusher = (*FileHandle)(nil)
 
-func (fh *FileHandle) createStagingFile(operation string, existsInDFS bool) error {
-	if fh.File.handle != nil {
-		return nil // there is already an active handle.
-	}
-
-	//create staging file
-	absPath := fh.File.AbsolutePath()
-	hdfsAccessor := fh.File.FileSystem.HdfsAccessor
-	if !existsInDFS { // it  is a new file so create it in the DFS
-		w, err := hdfsAccessor.CreateFile(absPath, fh.File.Attrs.Mode, false)
-		if err != nil {
-			logerror("Failed to create file in DFS", fh.logInfo(Fields{Operation: operation, Error: err}))
-			return err
-		}
-		loginfo("Created an empty file in DFS", fh.logInfo(Fields{Operation: operation}))
-		w.Close()
-	} else {
-		// Request to write to existing file
-		_, err := hdfsAccessor.Stat(absPath)
-		if err != nil {
-			logerror("Failed to stat file in DFS", fh.logInfo(Fields{Operation: operation, Error: err}))
-			return syscall.ENOENT
-		}
-	}
-
-	stagingFile, err := ioutil.TempFile(stagingDir, "stage")
-	if err != nil {
-		logerror("Failed to create staging file", fh.logInfo(Fields{Operation: operation, Error: err}))
-		return err
-	}
-	os.Remove(stagingFile.Name())
-	loginfo("Created staging file", fh.logInfo(Fields{Operation: operation, TmpFile: stagingFile.Name()}))
-
-	if existsInDFS {
-		if err := fh.downloadToStaging(stagingFile, operation); err != nil {
-			return err
-		}
-	}
-	fh.File.handle = stagingFile
-	return nil
-}
-
-func (fh *FileHandle) downloadToStaging(stagingFile *os.File, operation string) error {
-	hdfsAccessor := fh.File.FileSystem.HdfsAccessor
-	absPath := fh.File.AbsolutePath()
-
-	reader, err := hdfsAccessor.OpenRead(absPath)
-	if err != nil {
-		logerror("Failed to open file in DFS", fh.logInfo(Fields{Operation: operation, Error: err}))
-		// TODO remove the staging file if there are no more active handles
-		return err
-	}
-
-	nc, err := io.Copy(stagingFile, reader)
-	if err != nil {
-		logerror("Failed to copy content to staging file", fh.logInfo(Fields{Operation: operation, Error: err}))
-		return err
-	}
-	reader.Close()
-	loginfo(fmt.Sprintf("Downloaded a copy to stating dir. %d bytes copied", nc), fh.logInfo(Fields{Operation: operation}))
-	return nil
-}
-
-// Creates new file handle
-func NewFileHandle(file *FileINode, existsInDFS bool, flags fuse.OpenFlags) (*FileHandle, error) {
-
-	operation := Create
-	if existsInDFS {
-		operation = Open
-	}
-
-	fh := &FileHandle{File: file, fileFlags: flags, fhID: int64(rand.Uint64())}
-	if err := checkDiskSpace(); err != nil {
-		return nil, err
-	}
-
-	if err := fh.createStagingFile(operation, existsInDFS); err != nil {
-		return nil, err
-	}
-
-	loginfo("Opened file", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags}))
-	return fh, nil
-}
-
 func (fh *FileHandle) isWriteable() bool {
 	if fh.fileFlags.IsWriteOnly() || fh.fileFlags.IsReadWrite() {
 		return true
@@ -134,22 +44,6 @@ func (fh *FileHandle) Truncate(size int64) error {
 	}
 	loginfo("Truncated file", fh.logInfo(Fields{Operation: Truncate, Bytes: size}))
 	return nil
-}
-
-func checkDiskSpace() error {
-	var stat unix.Statfs_t
-	wd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	unix.Statfs(wd, &stat)
-	// Available blocks * size per block = available space in bytes
-	bytesAvailable := stat.Bavail * uint64(stat.Bsize)
-	if bytesAvailable < 64*1024*1024 {
-		return syscall.ENOSPC
-	} else {
-		return nil
-	}
 }
 
 // Returns attributes of the file associated with this handle

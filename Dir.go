@@ -235,7 +235,7 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 
 	loginfo("Creating a new file", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags})
 	file := dir.NodeFromAttrs(Attrs{Name: req.Name, Mode: req.Mode}).(*FileINode)
-	handle, err := NewFileHandle(file, false, req.Flags)
+	handle, err := file.NewFileHandle(false, req.Flags)
 	if err != nil {
 		logerror("File creation failed", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags, Error: err})
 		//TODO remove the entry from the cache

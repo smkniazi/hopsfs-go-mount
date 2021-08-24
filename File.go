@@ -4,15 +4,20 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"io/ioutil"
+	"math/rand"
 	"os"
 	"os/user"
 	"path"
 	"sync"
+	"syscall"
 	"time"
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"golang.org/x/net/context"
+	"golang.org/x/sys/unix"
 )
 
 type FileINode struct {
@@ -22,7 +27,7 @@ type FileINode struct {
 
 	activeHandles []*FileHandle // list of opened file handles
 	fileMutex     sync.Mutex    // mutex for activeHandles
-	handle        *os.File      // handle to the temp file in staging dir
+	handle        FileProxy     // handle to the temp file in staging dir
 }
 
 // Verify that *File implements necesary FUSE interfaces
@@ -56,7 +61,7 @@ func (file *FileINode) Open(ctx context.Context, req *fuse.OpenRequest, resp *fu
 	defer file.fileMutex.Unlock()
 
 	logdebug("Opening file", Fields{Operation: Open, Path: file.AbsolutePath(), Flags: req.Flags})
-	handle, err := NewFileHandle(file, true, req.Flags)
+	handle, err := file.NewFileHandle(true, req.Flags)
 	if err != nil {
 		return nil, err
 	}
@@ -180,4 +185,111 @@ func (file *FileINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, re
 
 func (file *FileINode) countActiveHandles() int {
 	return len(file.activeHandles)
+}
+
+func (file *FileINode) createStagingFile(operation string, existsInDFS bool) error {
+	if file.handle != nil {
+		return nil // there is already an active handle.
+	}
+
+	//create staging file
+	absPath := file.AbsolutePath()
+	hdfsAccessor := file.FileSystem.HdfsAccessor
+	if !existsInDFS { // it  is a new file so create it in the DFS
+		w, err := hdfsAccessor.CreateFile(absPath, file.Attrs.Mode, false)
+		if err != nil {
+			logerror("Failed to create file in DFS", file.logInfo(Fields{Operation: operation, Error: err}))
+			return err
+		}
+		loginfo("Created an empty file in DFS", file.logInfo(Fields{Operation: operation}))
+		w.Close()
+	} else {
+		// Request to write to existing file
+		_, err := hdfsAccessor.Stat(absPath)
+		if err != nil {
+			logerror("Failed to stat file in DFS", file.logInfo(Fields{Operation: operation, Error: err}))
+			return syscall.ENOENT
+		}
+	}
+
+	stagingFile, err := ioutil.TempFile(stagingDir, "stage")
+	if err != nil {
+		logerror("Failed to create staging file", file.logInfo(Fields{Operation: operation, Error: err}))
+		return err
+	}
+	os.Remove(stagingFile.Name())
+	loginfo("Created staging file", file.logInfo(Fields{Operation: operation, TmpFile: stagingFile.Name()}))
+
+	if existsInDFS {
+		if err := file.downloadToStaging(stagingFile, operation); err != nil {
+			return err
+		}
+	}
+	file.handle = &LocalFileProxy{localFile: stagingFile}
+	return nil
+}
+
+func (file *FileINode) downloadToStaging(stagingFile *os.File, operation string) error {
+	hdfsAccessor := file.FileSystem.HdfsAccessor
+	absPath := file.AbsolutePath()
+
+	reader, err := hdfsAccessor.OpenRead(absPath)
+	if err != nil {
+		logerror("Failed to open file in DFS", file.logInfo(Fields{Operation: operation, Error: err}))
+		// TODO remove the staging file if there are no more active handles
+		return err
+	}
+
+	nc, err := io.Copy(stagingFile, reader)
+	if err != nil {
+		logerror("Failed to copy content to staging file", file.logInfo(Fields{Operation: operation, Error: err}))
+		return err
+	}
+	reader.Close()
+	loginfo(fmt.Sprintf("Downloaded a copy to stating dir. %d bytes copied", nc), file.logInfo(Fields{Operation: operation}))
+	return nil
+}
+
+// Creates new file handle
+func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*FileHandle, error) {
+	operation := Create
+	if existsInDFS {
+		operation = Open
+	}
+
+	fh := &FileHandle{File: file, fileFlags: flags, fhID: int64(rand.Uint64())}
+	if err := file.checkDiskSpace(); err != nil {
+		return nil, err
+	}
+
+	if err := file.createStagingFile(operation, existsInDFS); err != nil {
+		return nil, err
+	}
+
+	loginfo("Opened file", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags}))
+	return fh, nil
+}
+
+func (file *FileINode) checkDiskSpace() error {
+	var stat unix.Statfs_t
+	wd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	unix.Statfs(wd, &stat)
+	// Available blocks * size per block = available space in bytes
+	bytesAvailable := stat.Bavail * uint64(stat.Bsize)
+	if bytesAvailable < 64*1024*1024 {
+		return syscall.ENOSPC
+	} else {
+		return nil
+	}
+}
+
+func (file *FileINode) logInfo(fields Fields) Fields {
+	f := Fields{Path: file.AbsolutePath()}
+	for k, e := range fields {
+		f[k] = e
+	}
+	return f
 }

@@ -25,9 +25,10 @@ type FileINode struct {
 	Attrs      Attrs       // Cache of file attributes // TODO: implement TTL
 	Parent     *DirINode   // Pointer to the parent directory (allows computing fully-qualified paths on demand)
 
-	activeHandles []*FileHandle // list of opened file handles
-	fileMutex     sync.Mutex    // mutex for activeHandles
-	handle        FileProxy     // handle to the temp file in staging dir
+	activeHandles   []*FileHandle // list of opened file handles
+	fileMutex       sync.Mutex    // mutex for file operation such as open, delete
+	handle          FileProxy     // handle to the temp file in staging dir
+	fileHandleMutex sync.Mutex    // mutex for file handle
 }
 
 // Verify that *File implements necesary FUSE interfaces
@@ -225,7 +226,7 @@ func (file *FileINode) createStagingFile(operation string, existsInDFS bool) err
 			return err
 		}
 	}
-	file.handle = &LocalFileProxy{localFile: stagingFile}
+	file.handle = &LocalFileProxy{localFile: stagingFile, file: file}
 	return nil
 }
 
@@ -252,6 +253,9 @@ func (file *FileINode) downloadToStaging(stagingFile *os.File, operation string)
 
 // Creates new file handle
 func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*FileHandle, error) {
+	file.lockFileHandle()
+	defer file.unLockFileHandle()
+
 	operation := Create
 	if existsInDFS {
 		operation = Open
@@ -292,4 +296,12 @@ func (file *FileINode) logInfo(fields Fields) Fields {
 		f[k] = e
 	}
 	return f
+}
+
+func (file *FileINode) lockFileHandle() {
+	file.fileHandleMutex.Lock()
+}
+
+func (file *FileINode) unLockFileHandle() {
+	file.fileHandleMutex.Unlock()
 }

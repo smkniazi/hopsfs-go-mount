@@ -2,50 +2,53 @@ package main
 
 import "os"
 
-type LocalFileProxy struct {
+type LocalRWFileProxy struct {
 	localFile *os.File // handle to the temp file in staging dir
 	file      *FileINode
 }
 
-var _ FileProxy = (*LocalFileProxy)(nil)
+var _ FileProxy = (*LocalRWFileProxy)(nil)
 
-func (p *LocalFileProxy) Truncate(size int64) error {
+func (p *LocalRWFileProxy) Truncate(size int64) error {
 	p.file.lockFileHandle()
 	defer p.file.unLockFileHandle()
 	return p.localFile.Truncate(size)
 }
 
-func (p *LocalFileProxy) WriteAt(b []byte, off int64) (n int, err error) {
+func (p *LocalRWFileProxy) WriteAt(b []byte, off int64) (n int, err error) {
 	p.file.lockFileHandle()
 	defer p.file.unLockFileHandle()
 	return p.localFile.WriteAt(b, off)
 }
 
-func (p *LocalFileProxy) ReadAt(b []byte, off int64) (n int, err error) {
+func (p *LocalRWFileProxy) ReadAt(b []byte, off int64) (n int, err error) {
 	p.file.lockFileHandle()
 	defer p.file.unLockFileHandle()
-	return p.localFile.ReadAt(b, off)
+	n, err = p.localFile.ReadAt(b, off)
+	logdebug("LocalFileProxy ReadAt", p.file.logInfo(Fields{Operation: Read, Bytes: n, Error: err, Offset: off}))
+	return
 }
 
-func (p *LocalFileProxy) Seek(offset int64, whence int) (ret int64, err error) {
+func (p *LocalRWFileProxy) SeekToStart() (err error) {
 	p.file.lockFileHandle()
 	defer p.file.unLockFileHandle()
-	return p.localFile.Seek(offset, whence)
+	_, err = p.localFile.Seek(0, 0)
+	return
 }
 
-func (p *LocalFileProxy) Read(b []byte) (n int, err error) {
+func (p *LocalRWFileProxy) Read(b []byte) (n int, err error) {
 	p.file.lockFileHandle()
 	defer p.file.unLockFileHandle()
 	return p.localFile.Read(b)
 }
 
-func (p *LocalFileProxy) Close() error {
+func (p *LocalRWFileProxy) Close() error {
 	p.file.lockFileHandle()
 	defer p.file.unLockFileHandle()
 	return p.localFile.Close()
 }
 
-func (p *LocalFileProxy) Sync() error {
+func (p *LocalRWFileProxy) Sync() error {
 	p.file.lockFileHandle()
 	defer p.file.unLockFileHandle()
 	return p.localFile.Sync()

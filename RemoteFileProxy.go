@@ -1,35 +1,80 @@
 package main
 
-type RemoteFileProxy struct {
+import (
+	"errors"
+	"os"
+)
+
+type RemoteROFileProxy struct {
+	hdfsReader ReadSeekCloser
+	file       *FileINode
 }
 
-var _ FileProxy = (*RemoteFileProxy)(nil)
+var _ FileProxy = (*RemoteROFileProxy)(nil)
 
-func (p *RemoteFileProxy) Truncate(size int64) error {
-	logfatal("Not implemented yet", nil)
+func (p *RemoteROFileProxy) Truncate(size int64) error {
+	p.file.lockFileHandle()
+	defer p.file.unLockFileHandle()
+	logfatal("Truncate API is not supported. Read only mode", nil)
 	return nil
 }
-func (p *RemoteFileProxy) WriteAt(b []byte, off int64) (n int, err error) {
-	logfatal("Not implemented yet", nil)
+
+func (p *RemoteROFileProxy) WriteAt(b []byte, off int64) (n int, err error) {
+	p.file.lockFileHandle()
+	defer p.file.unLockFileHandle()
+	logfatal("WriteAt API is not supported. Read only mode", nil)
 	return 0, nil
 }
-func (p *RemoteFileProxy) ReadAt(b []byte, off int64) (n int, err error) {
-	logfatal("Not implemented yet", nil)
-	return 0, nil
+
+func (p *RemoteROFileProxy) ReadAt(b []byte, off int64) (int, error) {
+	p.file.lockFileHandle()
+	defer p.file.unLockFileHandle()
+
+	if off < 0 {
+		return 0, &os.PathError{Op: "readat", Path: p.file.AbsolutePath(), Err: errors.New("negative offset")}
+	}
+
+	if err := p.hdfsReader.Seek(off); err != nil {
+		return 0, err
+	}
+
+	var err error = nil
+	var n int = 0
+	for len(b) > 0 {
+		m, e := p.hdfsReader.Read(b)
+		if e != nil {
+			err = e
+			break
+		}
+		n += m
+		b = b[m:]
+	}
+
+	logdebug("RemoteFileProxy ReadAt", p.file.logInfo(Fields{Operation: Read, Bytes: n, Error: err, Offset: off}))
+	return n, err
 }
-func (p *RemoteFileProxy) Seek(offset int64, whence int) (ret int64, err error) {
-	logfatal("Not implemented yet", nil)
-	return 0, nil
+
+func (p *RemoteROFileProxy) SeekToStart() (err error) {
+	p.file.lockFileHandle()
+	defer p.file.unLockFileHandle()
+	return p.hdfsReader.Seek(0)
 }
-func (p *RemoteFileProxy) Read(b []byte) (n int, err error) {
-	logfatal("Not implemented yet", nil)
-	return 0, nil
+
+func (p *RemoteROFileProxy) Read(b []byte) (n int, err error) {
+	p.file.lockFileHandle()
+	defer p.file.unLockFileHandle()
+	return p.hdfsReader.Read(b)
 }
-func (p *RemoteFileProxy) Close() error {
-	logfatal("Not implemented yet", nil)
-	return nil
+
+func (p *RemoteROFileProxy) Close() error {
+	p.file.lockFileHandle()
+	defer p.file.unLockFileHandle()
+	return p.hdfsReader.Close()
 }
-func (p *RemoteFileProxy) Sync() error {
-	logfatal("Not implemented yet", nil)
+
+func (p *RemoteROFileProxy) Sync() error {
+	p.file.lockFileHandle()
+	defer p.file.unLockFileHandle()
+	logfatal("Sync API is not supported. Read only mode", nil)
 	return nil
 }

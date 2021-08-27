@@ -20,13 +20,33 @@ func TestSimple(t *testing.T) {
 	withMount(t, "/", func(mountPoint string, hdfsAccessor HdfsAccessor) {
 		//create a file, make sure that use and group information is correct
 		testFile := filepath.Join(mountPoint, "somefile")
+		os.Remove(testFile)
+
 		loginfo(fmt.Sprintf("New file: %s", testFile), nil)
 		createFile(t, testFile, "some data")
 		fi, _ := os.Stat(testFile)
 		fstat := fi.Sys().(*syscall.Stat_t)
 		grupInfo, _ := user.LookupGroupId(fmt.Sprintf("%d", fstat.Gid))
 		userInfo, _ := user.LookupId(fmt.Sprintf("%d", fstat.Uid))
-		loginfo(fmt.Sprintf("New file: %s, User %s, Gropu %s", testFile, userInfo.Name, grupInfo.Name), nil)
+		loginfo(fmt.Sprintf("---> New file: %s, User %s, Gropu %s", testFile, userInfo.Name, grupInfo.Name), nil)
+
+		loginfo("---> Reopening the file to write some more data", nil)
+		// append some more data
+		c, err := os.OpenFile(testFile, os.O_APPEND, 0600)
+		if err != nil {
+			t.Errorf("Reopening the file failed. File: %s. Error: %v", testFile, err)
+		}
+		c.WriteString("some more data")
+		c.Close()
+
+		loginfo("---> Reopening the file to read all the data", nil)
+		// read all the data again
+		c, _ = os.OpenFile(testFile, os.O_RDWR, 0600)
+		buffer := make([]byte, 1024)
+		c.Read(buffer)
+		c.Close()
+		logdebug(fmt.Sprintf("Data Read. %s", buffer), nil)
+
 		os.Remove(testFile)
 	})
 }

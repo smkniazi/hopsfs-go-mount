@@ -29,8 +29,8 @@ var _ fs.HandleWriter = (*FileHandle)(nil)
 var _ fs.NodeFsyncer = (*FileHandle)(nil)
 var _ fs.HandleFlusher = (*FileHandle)(nil)
 
-func (fh *FileHandle) isWriteable() bool {
-	if fh.fileFlags.IsWriteOnly() || fh.fileFlags.IsReadWrite() {
+func (fh *FileHandle) dataChanged() bool {
+	if fh.totalBytesWritten > 0 {
 		return true
 	} else {
 		return false
@@ -66,14 +66,13 @@ func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fus
 	if err != nil {
 		if err == io.EOF {
 			// EOF isn't a error, reporting successful read to FUSE
-			logdebug("Finished reading from staging file. EOF", fh.logInfo(Fields{Operation: Read, Bytes: nr}))
+			logdebug("Completed reading", fh.logInfo(Fields{Operation: Read, Error: err, Bytes: nr}))
 			return nil
 		} else {
-			logerror("Failed to read from staging file", fh.logInfo(Fields{Operation: Read, Error: err, Bytes: nr}))
+			logerror("Failed to read", fh.logInfo(Fields{Operation: Read, Error: err, Bytes: nr}))
 			return err
 		}
 	}
-	logdebug("Read from staging file", fh.logInfo(Fields{Operation: Read, Bytes: nr, ReqOffset: req.Offset}))
 	return err
 }
 
@@ -81,6 +80,9 @@ func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fus
 func (fh *FileHandle) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
 	fh.Mutex.Lock()
 	defer fh.Mutex.Unlock()
+
+	// as an optimization the file is initially opened in readonly mode
+	fh.File.upgradeHandleForWriting()
 
 	nw, err := fh.File.handle.WriteAt(req.Data, req.Offset)
 	resp.Size = nw
@@ -123,9 +125,9 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 	}
 
 	//open the file for reading and upload to DFS
-	offset, err := fh.File.handle.Seek(0, 0)
-	if err != nil || offset != 0 {
-		logerror("Unable to seek to the begenning of the temp file", fh.logInfo(Fields{Operation: operation, Offset: offset, Error: err}))
+	err = fh.File.handle.SeekToStart()
+	if err != nil {
+		logerror("Unable to seek to the begenning of the temp file", fh.logInfo(Fields{Operation: operation, Error: err}))
 		return err
 	}
 
@@ -164,7 +166,7 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 func (fh *FileHandle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 	fh.Mutex.Lock()
 	defer fh.Mutex.Unlock()
-	if fh.isWriteable() {
+	if fh.dataChanged() {
 		loginfo("Flush file", fh.logInfo(Fields{Operation: Flush}))
 		return fh.copyToDFS(Flush)
 	} else {
@@ -176,7 +178,7 @@ func (fh *FileHandle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 func (fh *FileHandle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
 	fh.Mutex.Lock()
 	defer fh.Mutex.Unlock()
-	if fh.isWriteable() {
+	if fh.dataChanged() {
 		loginfo("Fsync file", fh.logInfo(Fields{Operation: Fsync}))
 		return fh.copyToDFS(Fsync)
 	} else {

@@ -144,7 +144,7 @@ func (file *FileINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, re
 	if req.Valid.Mode() {
 		loginfo("Setting attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode})
 		(func() {
-			err = file.FileSystem.HdfsAccessor.Chmod(path, req.Mode)
+			err = file.FileSystem.getDFSConnector().Chmod(path, req.Mode)
 			if err != nil {
 				return
 			}
@@ -171,7 +171,7 @@ func (file *FileINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, re
 
 		loginfo("Setting attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group})
 		(func() {
-			err = file.FileSystem.HdfsAccessor.Chown(path, fmt.Sprint(req.Uid), fmt.Sprint(req.Gid))
+			err = file.FileSystem.getDFSConnector().Chown(path, fmt.Sprint(req.Uid), fmt.Sprint(req.Gid))
 			if err != nil {
 				return
 			}
@@ -199,7 +199,7 @@ func (file *FileINode) createStagingFile(operation string, existsInDFS bool) (*o
 
 	//create staging file
 	absPath := file.AbsolutePath()
-	hdfsAccessor := file.FileSystem.HdfsAccessor
+	hdfsAccessor := file.FileSystem.getDFSConnector()
 	if !existsInDFS { // it  is a new file so create it in the DFS
 		w, err := hdfsAccessor.CreateFile(absPath, file.Attrs.Mode, false)
 		if err != nil {
@@ -234,7 +234,7 @@ func (file *FileINode) createStagingFile(operation string, existsInDFS bool) (*o
 }
 
 func (file *FileINode) downloadToStaging(stagingFile *os.File, operation string) error {
-	hdfsAccessor := file.FileSystem.HdfsAccessor
+	hdfsAccessor := file.FileSystem.getDFSConnector()
 	absPath := file.AbsolutePath()
 
 	reader, err := hdfsAccessor.OpenRead(absPath)
@@ -288,7 +288,7 @@ func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*F
 			// then we upgrade the handle. However, if the file is already opened in
 			// in RW state then we use the existing RW handle
 			// if file.handle
-			reader, _ := file.FileSystem.HdfsAccessor.OpenRead(file.AbsolutePath())
+			reader, _ := file.FileSystem.getDFSConnector().OpenRead(file.AbsolutePath())
 			fh.File.handle = &RemoteROFileProxy{hdfsReader: reader, file: file}
 			loginfo("Opened file, RO handle", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags}))
 		}

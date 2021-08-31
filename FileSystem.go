@@ -20,15 +20,16 @@ import (
 )
 
 type FileSystem struct {
-	HdfsAccessor    HdfsAccessor // Interface to access HDFS
-	SrcDir          string       // Src directory that will mounted
-	AllowedPrefixes []string     // List of allowed path prefixes (only those prefixes are exposed via mountpoint)
-	ExpandZips      bool         // Indicates whether ZIP expansion feature is enabled
-	ReadOnly        bool         // Indicates whether mount filesystem with readonly
-	Mounted         bool         // True if filesystem is mounted
-	RetryPolicy     *RetryPolicy // Retry policy
-	Clock           Clock        // interface to get wall clock time
-	FsInfo          FsInfo       // Usage of HDFS, including capacity, remaining, used sizes.
+	HdfsAccessors      []HdfsAccessor // Interface to access HDFS
+	hdfsAccessorsIndex int
+	SrcDir             string       // Src directory that will mounted
+	AllowedPrefixes    []string     // List of allowed path prefixes (only those prefixes are exposed via mountpoint)
+	ExpandZips         bool         // Indicates whether ZIP expansion feature is enabled
+	ReadOnly           bool         // Indicates whether mount filesystem with readonly
+	Mounted            bool         // True if filesystem is mounted
+	RetryPolicy        *RetryPolicy // Retry policy
+	Clock              Clock        // interface to get wall clock time
+	FsInfo             FsInfo       // Usage of HDFS, including capacity, remaining, used sizes.
 
 	closeOnUnmount     []io.Closer // list of opened files (zip archives) to be closed on unmount
 	closeOnUnmountLock sync.Mutex  // mutex to protet closeOnUnmount
@@ -39,9 +40,9 @@ var _ fs.FS = (*FileSystem)(nil)
 var _ fs.FSStatfser = (*FileSystem)(nil)
 
 // Creates an instance of mountable file system
-func NewFileSystem(hdfsAccessor HdfsAccessor, srcDir string, allowedPrefixes []string, expandZips bool, readOnly bool, retryPolicy *RetryPolicy, clock Clock) (*FileSystem, error) {
+func NewFileSystem(hdfsAccessors []HdfsAccessor, srcDir string, allowedPrefixes []string, expandZips bool, readOnly bool, retryPolicy *RetryPolicy, clock Clock) (*FileSystem, error) {
 	return &FileSystem{
-		HdfsAccessor:    hdfsAccessor,
+		HdfsAccessors:   hdfsAccessors,
 		Mounted:         false,
 		AllowedPrefixes: allowedPrefixes,
 		ExpandZips:      expandZips,
@@ -132,7 +133,7 @@ func (filesystem *FileSystem) CloseOnUnmount(file io.Closer) {
 // Statfs is called to obtain file system metadata.
 // It should write that data to resp.
 func (filesystem *FileSystem) Statfs(ctx context.Context, req *fuse.StatfsRequest, resp *fuse.StatfsResponse) error {
-	fsInfo, err := filesystem.HdfsAccessor.StatFs()
+	fsInfo, err := filesystem.getDFSConnector().StatFs()
 	if err != nil {
 		logwarn("Stat DFS failed", Fields{Operation: StatFS, Error: err})
 		return err
@@ -142,4 +143,11 @@ func (filesystem *FileSystem) Statfs(ctx context.Context, req *fuse.StatfsReques
 	resp.Bavail = resp.Bfree
 	resp.Blocks = fsInfo.capacity / uint64(resp.Bsize)
 	return nil
+}
+
+func (filesystem *FileSystem) getDFSConnector() HdfsAccessor {
+	filesystem.hdfsAccessorsIndex = filesystem.hdfsAccessorsIndex + 1
+	index := filesystem.hdfsAccessorsIndex % len(filesystem.HdfsAccessors)
+	loginfo(fmt.Sprintf("Client index %d. len %d", index, len(filesystem.HdfsAccessors)), nil)
+	return filesystem.HdfsAccessors[index]
 }

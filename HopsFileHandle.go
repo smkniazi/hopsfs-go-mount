@@ -111,13 +111,13 @@ func (fh *FileHandle) copyToDFS(operation string) error {
 			return err
 		}
 		// Reconnect and try again
-		fh.File.FileSystem.HdfsAccessor.Close()
+		fh.File.FileSystem.getDFSConnector().Close()
 		logwarn("Failed to copy file to DFS", fh.logInfo(Fields{Operation: operation}))
 	}
 }
 
 func (fh *FileHandle) FlushAttempt(operation string) error {
-	hdfsAccessor := fh.File.FileSystem.HdfsAccessor
+	hdfsAccessor := fh.File.FileSystem.getDFSConnector()
 	w, err := hdfsAccessor.CreateFile(fh.File.AbsolutePath(), fh.File.Attrs.Mode, true)
 	if err != nil {
 		logerror("Error creating file in DFS", fh.logInfo(Fields{Operation: operation, Error: err}))

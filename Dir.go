@@ -148,7 +148,7 @@ func (dir *DirINode) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	absolutePath := dir.AbsolutePath()
 	loginfo("Read directory", Fields{Operation: ReadDir, Path: absolutePath})
 
-	allAttrs, err := dir.FileSystem.HdfsAccessor.ReadDir(absolutePath)
+	allAttrs, err := dir.FileSystem.getDFSConnector().ReadDir(absolutePath)
 	if err != nil {
 		logwarn("Failed to list DFS directory", Fields{Operation: ReadDir, Path: absolutePath, Error: err})
 		return nil, err
@@ -203,7 +203,7 @@ func (dir *DirINode) NodeFromAttrs(attrs Attrs) fs.Node {
 func (dir *DirINode) LookupAttrs(name string, attrs *Attrs) error {
 
 	var err error
-	*attrs, err = dir.FileSystem.HdfsAccessor.Stat(path.Join(dir.AbsolutePath(), name))
+	*attrs, err = dir.FileSystem.getDFSConnector().Stat(path.Join(dir.AbsolutePath(), name))
 	if err != nil {
 		// It is a warning as each time new file write tries to stat if the file exists
 		loginfo("Stat failed", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name), Error: err})
@@ -221,7 +221,7 @@ func (dir *DirINode) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node
 	dir.mutex.Lock()
 	defer dir.mutex.Unlock()
 
-	err := dir.FileSystem.HdfsAccessor.Mkdir(dir.AbsolutePathForChild(req.Name), req.Mode)
+	err := dir.FileSystem.getDFSConnector().Mkdir(dir.AbsolutePathForChild(req.Name), req.Mode)
 	if err != nil {
 		return nil, err
 	}
@@ -252,11 +252,11 @@ func (dir *DirINode) Remove(ctx context.Context, req *fuse.RemoveRequest) error 
 
 	path := dir.AbsolutePathForChild(req.Name)
 	loginfo("Removing path", Fields{Operation: Remove, Path: path})
-	err := dir.FileSystem.HdfsAccessor.Remove(path)
+	err := dir.FileSystem.getDFSConnector().Remove(path)
 	if err == nil {
 		dir.EntriesRemove(req.Name)
 	} else {
-		logerror("Failed to remove path", Fields{Operation: Remove, Path: path, Error: err})
+		logwarn("Failed to remove path", Fields{Operation: Remove, Path: path, Error: err})
 	}
 	return err
 }
@@ -269,7 +269,7 @@ func (dir *DirINode) Rename(ctx context.Context, req *fuse.RenameRequest, newDir
 	oldPath := dir.AbsolutePathForChild(req.OldName)
 	newPath := newDir.(*DirINode).AbsolutePathForChild(req.NewName)
 	loginfo("Renaming to "+newPath, Fields{Operation: Rename, Path: oldPath})
-	err := dir.FileSystem.HdfsAccessor.Rename(oldPath, newPath)
+	err := dir.FileSystem.getDFSConnector().Rename(oldPath, newPath)
 	if err == nil {
 		// Upon successful rename, updating in-memory representation of the file entry
 		if node := dir.EntriesGet(req.OldName); node != nil {
@@ -297,7 +297,7 @@ func (dir *DirINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp
 	if req.Valid.Mode() {
 		loginfo("Setting attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode})
 		(func() {
-			err = dir.FileSystem.HdfsAccessor.Chmod(path, req.Mode)
+			err = dir.FileSystem.getDFSConnector().Chmod(path, req.Mode)
 			if err != nil {
 				return
 			}
@@ -324,7 +324,7 @@ func (dir *DirINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp
 
 		loginfo("Setting attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group})
 		(func() {
-			err = dir.FileSystem.HdfsAccessor.Chown(path, owner, group)
+			err = dir.FileSystem.getDFSConnector().Chown(path, owner, group)
 			if err != nil {
 				return
 			}

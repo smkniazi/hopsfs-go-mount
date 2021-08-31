@@ -43,7 +43,7 @@ func TestZipDirReadArchive(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockClock := &MockClock{}
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
-	fs, _ := NewFileSystem(hdfsAccessor, "/", []string{"*"}, true, false, NewDefaultRetryPolicy(mockClock), mockClock)
+	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"*"}, true, false, NewDefaultRetryPolicy(mockClock), mockClock)
 	zipFile, err := os.Open(testZipPath())
 	assert.Nil(t, err)
 	zipFileInfo, err := zipFile.Stat()

@@ -66,7 +66,7 @@ const (
 var ReportCaller = true
 
 func init() {
-	initLogger("trace", false, "")
+	initLogger("fatal", false, "")
 }
 
 func initLogger(l string, reportCaller bool, lfile string) {

@@ -29,6 +29,7 @@ var allowedPrefixesString *string
 var expandZips *bool
 var readOnly *bool
 var tls *bool
+var connectors int
 
 func main() {
 
@@ -51,27 +52,32 @@ func main() {
 		ClientKey:         clientKey,
 	}
 
-	hdfsAccessor, err := NewHdfsAccessor(hopsRpcAddress, WallClock{}, tlsConfig)
-	if err != nil {
-		logfatal(fmt.Sprintf("Error/NewHopsFSAccessor: %v ", err), nil)
+	ftHdfsAccessors := make([]HdfsAccessor, connectors)
+
+	for i := 0; i < connectors; i++ {
+		hdfsAccessor, err := NewHdfsAccessor(hopsRpcAddress, WallClock{}, tlsConfig)
+		if err != nil {
+			logfatal(fmt.Sprintf("Error/NewHopsFSAccessor: %v ", err), nil)
+		}
+		ftHdfsAccessors[i] = NewFaultTolerantHdfsAccessor(hdfsAccessor, retryPolicy)
 	}
+	loginfo(fmt.Sprintf("Create %d file system clients", len(ftHdfsAccessors)), nil)
 
 	if strings.Compare(mntSrcDir, "/") != 0 {
-		err = checkSrcMountPath(hdfsAccessor)
+		err := checkSrcMountPath(ftHdfsAccessors[0])
 		if err != nil {
 			logfatal(fmt.Sprintf("Unable to mount the file system as source mount directory is not accessible. Error: %v ", err), nil)
 		}
 	}
 
 	// Wrapping with FaultTolerantHdfsAccessor
-	ftHdfsAccessor := NewFaultTolerantHdfsAccessor(hdfsAccessor, retryPolicy)
 
-	if !*lazyMount && ftHdfsAccessor.EnsureConnected() != nil {
+	if !*lazyMount && ftHdfsAccessors[0].EnsureConnected() != nil {
 		logfatal("Can't establish connection to HopsFS, mounting will NOT be performend (this can be suppressed with -lazy", nil)
 	}
 
 	// Creating the virtual file system
-	fileSystem, err := NewFileSystem(ftHdfsAccessor, mntSrcDir, allowedPrefixes /**expandZips*/, false, *readOnly, retryPolicy, WallClock{})
+	fileSystem, err := NewFileSystem(ftHdfsAccessors, mntSrcDir, allowedPrefixes /**expandZips*/, false, *readOnly, retryPolicy, WallClock{})
 	if err != nil {
 		logfatal(fmt.Sprintf("Error/NewFileSystem: %v ", err), nil)
 	}
@@ -147,6 +153,7 @@ func parseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.StringVar(&clientKey, "clientKey", "/srv/hops/super_crypto/hdfs/hdfs_priv.pem", "Client key location")
 	flag.StringVar(&mntSrcDir, "srcDir", "/", "HopsFS src directory")
 	flag.StringVar(&logFile, "logFile", "", "Log file path. By default the log is written to console")
+	flag.IntVar(&connectors, "numConnections", 1, "Number of connections with the namenode")
 
 	flag.Usage = Usage
 	flag.Parse()

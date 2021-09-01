@@ -13,22 +13,22 @@ type RemoteROFileProxy struct {
 var _ FileProxy = (*RemoteROFileProxy)(nil)
 
 func (p *RemoteROFileProxy) Truncate(size int64) error {
-	p.file.lockFileHandle()
-	defer p.file.unLockFileHandle()
+	p.file.lockFileHandles()
+	defer p.file.unlockFileHandles()
 	logfatal("Truncate API is not supported. Read only mode", nil)
 	return nil
 }
 
 func (p *RemoteROFileProxy) WriteAt(b []byte, off int64) (n int, err error) {
-	p.file.lockFileHandle()
-	defer p.file.unLockFileHandle()
+	p.file.lockFileHandles()
+	defer p.file.unlockFileHandles()
 	logfatal("WriteAt API is not supported. Read only mode", nil)
 	return 0, nil
 }
 
 func (p *RemoteROFileProxy) ReadAt(b []byte, off int64) (int, error) {
-	p.file.lockFileHandle()
-	defer p.file.unLockFileHandle()
+	p.file.lockFileHandles()
+	defer p.file.unlockFileHandles()
 
 	if off < 0 {
 		return 0, &os.PathError{Op: "readat", Path: p.file.AbsolutePath(), Err: errors.New("negative offset")}
@@ -55,26 +55,26 @@ func (p *RemoteROFileProxy) ReadAt(b []byte, off int64) (int, error) {
 }
 
 func (p *RemoteROFileProxy) SeekToStart() (err error) {
-	p.file.lockFileHandle()
-	defer p.file.unLockFileHandle()
+	p.file.lockFileHandles()
+	defer p.file.unlockFileHandles()
 	return p.hdfsReader.Seek(0)
 }
 
 func (p *RemoteROFileProxy) Read(b []byte) (n int, err error) {
-	p.file.lockFileHandle()
-	defer p.file.unLockFileHandle()
+	p.file.lockFileHandles()
+	defer p.file.unlockFileHandles()
 	return p.hdfsReader.Read(b)
 }
 
 func (p *RemoteROFileProxy) Close() error {
-	p.file.lockFileHandle()
-	defer p.file.unLockFileHandle()
+	p.file.lockFileHandles()
+	defer p.file.unlockFileHandles()
 	return p.hdfsReader.Close()
 }
 
 func (p *RemoteROFileProxy) Sync() error {
-	p.file.lockFileHandle()
-	defer p.file.unLockFileHandle()
+	p.file.lockFileHandles()
+	defer p.file.unlockFileHandles()
 	logfatal("Sync API is not supported. Read only mode", nil)
 	return nil
 }

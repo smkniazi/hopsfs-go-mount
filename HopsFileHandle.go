@@ -14,7 +14,7 @@ import (
 // Represends a handle to an open file
 type FileHandle struct {
 	File              *FileINode
-	Mutex             sync.Mutex     // all operations on the handle are serialized to simplify invariants
+	mutex             sync.Mutex     // all operations on the handle are serialized to simplify invariants
 	fileFlags         fuse.OpenFlags // flags used to creat the file
 	tatalBytesRead    int64
 	totalBytesWritten int64
@@ -48,15 +48,15 @@ func (fh *FileHandle) Truncate(size int64) error {
 
 // Returns attributes of the file associated with this handle
 func (fh *FileHandle) Attr(ctx context.Context, a *fuse.Attr) error {
-	fh.Mutex.Lock()
-	defer fh.Mutex.Unlock()
+	fh.lockHandle()
+	defer fh.unlockHandle()
 	return fh.File.Attr(ctx, a)
 }
 
 // Responds to FUSE Read request
 func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
-	fh.Mutex.Lock()
-	defer fh.Mutex.Unlock()
+	fh.lockHandle()
+	defer fh.unlockHandle()
 
 	buf := resp.Data[0:req.Size]
 	nr, err := fh.File.handle.ReadAt(buf, req.Offset)
@@ -78,8 +78,8 @@ func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fus
 
 // Responds to FUSE Write request
 func (fh *FileHandle) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
-	fh.Mutex.Lock()
-	defer fh.Mutex.Unlock()
+	fh.lockHandle()
+	defer fh.unlockHandle()
 
 	// as an optimization the file is initially opened in readonly mode
 	fh.File.upgradeHandleForWriting()
@@ -164,8 +164,8 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 
 // Responds to the FUSE Flush request
 func (fh *FileHandle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
-	fh.Mutex.Lock()
-	defer fh.Mutex.Unlock()
+	fh.lockHandle()
+	defer fh.unlockHandle()
 	if fh.dataChanged() {
 		loginfo("Flush file", fh.logInfo(Fields{Operation: Flush}))
 		return fh.copyToDFS(Flush)
@@ -176,8 +176,8 @@ func (fh *FileHandle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 
 // Responds to the FUSE Fsync request
 func (fh *FileHandle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
-	fh.Mutex.Lock()
-	defer fh.Mutex.Unlock()
+	fh.lockHandle()
+	defer fh.unlockHandle()
 	if fh.dataChanged() {
 		loginfo("Fsync file", fh.logInfo(Fields{Operation: Fsync}))
 		return fh.copyToDFS(Fsync)
@@ -188,8 +188,8 @@ func (fh *FileHandle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
 
 // Closes the handle
 func (fh *FileHandle) Release(_ context.Context, _ *fuse.ReleaseRequest) error {
-	fh.Mutex.Lock()
-	defer fh.Mutex.Unlock()
+	fh.lockHandle()
+	defer fh.unlockHandle()
 
 	//close the file handle if it is the last handle
 	fh.File.InvalidateMetadataCache()
@@ -216,4 +216,12 @@ func (fh *FileHandle) logInfo(fields Fields) Fields {
 		f[k] = e
 	}
 	return f
+}
+
+func (fh *FileHandle) lockHandle() {
+	fh.mutex.Lock()
+}
+
+func (fh *FileHandle) unlockHandle() {
+	fh.mutex.Unlock()
 }

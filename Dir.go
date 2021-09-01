@@ -53,8 +53,8 @@ func (dir *DirINode) AbsolutePathForChild(name string) string {
 
 // Responds on FUSE request to get directory attributes
 func (dir *DirINode) Attr(ctx context.Context, a *fuse.Attr) error {
-	dir.mutex.Lock()
-	defer dir.mutex.Unlock()
+	dir.lockMutex()
+	defer dir.unlockMutex()
 	if dir.Parent != nil && dir.FileSystem.Clock.Now().After(dir.Attrs.Expires) {
 		err := dir.Parent.LookupAttrs(dir.Attrs.Name, &dir.Attrs)
 		if err != nil {
@@ -103,8 +103,8 @@ func (dir *DirINode) EntriesRemove(name string) {
 
 // Responds on FUSE request to lookup the directory
 func (dir *DirINode) Lookup(ctx context.Context, name string) (fs.Node, error) {
-	dir.mutex.Lock()
-	defer dir.mutex.Unlock()
+	dir.lockMutex()
+	defer dir.unlockMutex()
 
 	if !dir.FileSystem.IsPathAllowed(dir.AbsolutePathForChild(name)) {
 		return nil, fuse.ENOENT
@@ -142,8 +142,8 @@ func (dir *DirINode) Lookup(ctx context.Context, name string) (fs.Node, error) {
 
 // Responds on FUSE request to read directory
 func (dir *DirINode) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
-	dir.mutex.Lock()
-	defer dir.mutex.Unlock()
+	dir.lockMutex()
+	defer dir.unlockMutex()
 
 	absolutePath := dir.AbsolutePath()
 	loginfo("Read directory", Fields{Operation: ReadDir, Path: absolutePath})
@@ -218,8 +218,8 @@ func (dir *DirINode) LookupAttrs(name string, attrs *Attrs) error {
 
 // Responds on FUSE Mkdir request
 func (dir *DirINode) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, error) {
-	dir.mutex.Lock()
-	defer dir.mutex.Unlock()
+	dir.lockMutex()
+	defer dir.unlockMutex()
 
 	err := dir.FileSystem.getDFSConnector().Mkdir(dir.AbsolutePathForChild(req.Name), req.Mode)
 	if err != nil {
@@ -230,8 +230,8 @@ func (dir *DirINode) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node
 
 // Responds on FUSE Create request
 func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
-	dir.mutex.Lock()
-	defer dir.mutex.Unlock()
+	dir.lockMutex()
+	defer dir.unlockMutex()
 
 	loginfo("Creating a new file", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags})
 	file := dir.NodeFromAttrs(Attrs{Name: req.Name, Mode: req.Mode}).(*FileINode)
@@ -247,8 +247,8 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 
 // Responds on FUSE Remove request
 func (dir *DirINode) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
-	dir.mutex.Lock()
-	defer dir.mutex.Unlock()
+	dir.lockMutex()
+	defer dir.unlockMutex()
 
 	path := dir.AbsolutePathForChild(req.Name)
 	loginfo("Removing path", Fields{Operation: Remove, Path: path})
@@ -263,8 +263,8 @@ func (dir *DirINode) Remove(ctx context.Context, req *fuse.RemoveRequest) error 
 
 // Responds on FUSE Rename request
 func (dir *DirINode) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.Node) error {
-	dir.mutex.Lock()
-	defer dir.mutex.Unlock()
+	dir.lockMutex()
+	defer dir.unlockMutex()
 
 	oldPath := dir.AbsolutePathForChild(req.OldName)
 	newPath := newDir.(*DirINode).AbsolutePathForChild(req.NewName)
@@ -287,8 +287,8 @@ func (dir *DirINode) Rename(ctx context.Context, req *fuse.RenameRequest, newDir
 
 // Responds on FUSE Chmod request
 func (dir *DirINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
-	dir.mutex.Lock()
-	defer dir.mutex.Unlock()
+	dir.lockMutex()
+	defer dir.unlockMutex()
 
 	// Get the filepath, so chmod in hdfs can work
 	path := dir.AbsolutePath()
@@ -339,4 +339,14 @@ func (dir *DirINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp
 	}
 
 	return err
+}
+
+var dirLockTime time.Time = time.Time{}
+
+func (dir *DirINode) lockMutex() {
+	dir.mutex.Lock()
+}
+
+func (dir *DirINode) unlockMutex() {
+	dir.mutex.Unlock()
 }

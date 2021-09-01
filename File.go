@@ -47,8 +47,9 @@ func (file *FileINode) AbsolutePath() string {
 
 // Responds to the FUSE file attribute request
 func (file *FileINode) Attr(ctx context.Context, a *fuse.Attr) error {
-	file.fileMutex.Lock()
-	defer file.fileMutex.Unlock()
+	file.lockFile()
+	defer file.unlockFile()
+
 	if file.FileSystem.Clock.Now().After(file.Attrs.Expires) {
 		err := file.Parent.LookupAttrs(file.Attrs.Name, &file.Attrs)
 		if err != nil {
@@ -60,8 +61,8 @@ func (file *FileINode) Attr(ctx context.Context, a *fuse.Attr) error {
 
 // Responds to the FUSE file open request (creates new file handle)
 func (file *FileINode) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
-	file.fileMutex.Lock()
-	defer file.fileMutex.Unlock()
+	file.lockFile()
+	defer file.unlockFile()
 
 	logdebug("Opening file", Fields{Operation: Open, Path: file.AbsolutePath(), Flags: req.Flags})
 	handle, err := file.NewFileHandle(true, req.Flags)
@@ -75,8 +76,9 @@ func (file *FileINode) Open(ctx context.Context, req *fuse.OpenRequest, resp *fu
 
 // Opens file for reading
 func (file *FileINode) OpenRead() (ReadSeekCloser, error) {
-	file.fileMutex.Lock()
-	defer file.fileMutex.Unlock()
+	file.lockFile()
+	defer file.unlockFile()
+
 	handle, err := file.Open(nil, &fuse.OpenRequest{Flags: fuse.OpenReadOnly}, nil)
 	if err != nil {
 		return nil, err
@@ -86,11 +88,16 @@ func (file *FileINode) OpenRead() (ReadSeekCloser, error) {
 
 // Registers an opened file handle
 func (file *FileINode) AddHandle(handle *FileHandle) {
+	file.lockFileHandles()
+	defer file.unlockFileHandles()
 	file.activeHandles = append(file.activeHandles, handle)
 }
 
 // Unregisters an opened file handle
 func (file *FileINode) RemoveHandle(handle *FileHandle) {
+	file.lockFileHandles()
+	defer file.unlockFileHandles()
+
 	for i, h := range file.activeHandles {
 		if h == handle {
 			file.activeHandles = append(file.activeHandles[:i], file.activeHandles[i+1:]...)
@@ -102,8 +109,9 @@ func (file *FileINode) RemoveHandle(handle *FileHandle) {
 // Responds to the FUSE Fsync request
 func (file *FileINode) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
 	loginfo(fmt.Sprintf("Dispatching fsync request to all open handles: %d", len(file.activeHandles)), Fields{Operation: Fsync})
-	file.fileMutex.Lock()
-	defer file.fileMutex.Unlock()
+	file.lockFile()
+	defer file.unlockFile()
+
 	var retErr error
 	for _, handle := range file.activeHandles {
 		err := handle.Fsync(ctx, req)
@@ -121,8 +129,8 @@ func (file *FileINode) InvalidateMetadataCache() {
 
 // Responds on FUSE Chmod request
 func (file *FileINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
-	file.fileMutex.Lock()
-	defer file.fileMutex.Unlock()
+	file.lockFile()
+	defer file.unlockFile()
 
 	if req.Valid.Size() {
 		var retErr error
@@ -189,6 +197,8 @@ func (file *FileINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, re
 }
 
 func (file *FileINode) countActiveHandles() int {
+	file.lockFileHandles()
+	file.unlockFileHandles()
 	return len(file.activeHandles)
 }
 
@@ -256,8 +266,8 @@ func (file *FileINode) downloadToStaging(stagingFile *os.File, operation string)
 
 // Creates new file handle
 func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*FileHandle, error) {
-	file.lockFileHandle()
-	defer file.unLockFileHandle()
+	file.lockFileHandles()
+	defer file.unlockFileHandles()
 
 	fh := &FileHandle{File: file, fileFlags: flags, fhID: int64(rand.Uint64())}
 	operation := Create
@@ -298,8 +308,8 @@ func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*F
 
 // changes RO file handle to RW
 func (file *FileINode) upgradeHandleForWriting() error {
-	file.lockFileHandle()
-	defer file.unLockFileHandle()
+	file.lockFileHandles()
+	defer file.unlockFileHandles()
 
 	var upgrade = false
 	if _, ok := file.handle.(*LocalRWFileProxy); ok {
@@ -356,10 +366,18 @@ func (file *FileINode) logInfo(fields Fields) Fields {
 	return f
 }
 
-func (file *FileINode) lockFileHandle() {
+func (file *FileINode) lockFileHandles() {
 	file.fileHandleMutex.Lock()
 }
 
-func (file *FileINode) unLockFileHandle() {
+func (file *FileINode) unlockFileHandles() {
 	file.fileHandleMutex.Unlock()
+}
+
+func (file *FileINode) lockFile() {
+	file.fileMutex.Lock()
+}
+
+func (file *FileINode) unlockFile() {
+	file.fileMutex.Unlock()
 }

@@ -30,6 +30,7 @@ var expandZips *bool
 var readOnly *bool
 var tls *bool
 var connectors int
+var version *bool
 
 func main() {
 
@@ -154,9 +155,15 @@ func parseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.StringVar(&mntSrcDir, "srcDir", "/", "HopsFS src directory")
 	flag.StringVar(&logFile, "logFile", "", "Log file path. By default the log is written to console")
 	flag.IntVar(&connectors, "numConnections", 1, "Number of connections with the namenode")
+	version = flag.Bool("version", false, "Print version")
 
 	flag.Usage = Usage
 	flag.Parse()
+
+	if *version {
+		fmt.Println(VERSION)
+		os.Exit(0)
+	}
 
 	if flag.NArg() != 2 {
 		Usage()

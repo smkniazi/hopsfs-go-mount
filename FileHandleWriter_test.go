@@ -20,7 +20,7 @@ func TestReadWriteFile(t *testing.T) {
 	mockClock := &MockClock{}
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
 	fileName := "/testWriteFile_1"
-	fs, _ := NewFileSystem(hdfsAccessor, "/", []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
+	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
 
 	hdfswriter := NewMockHdfsWriter(mockCtrl)
 
@@ -30,7 +30,7 @@ func TestReadWriteFile(t *testing.T) {
 	hdfswriter.EXPECT().Close().Return(nil).AnyTimes()
 
 	root, _ := fs.Root()
-	_, h, err := root.(*Dir).Create(nil, &fuse.CreateRequest{Name: fileName,
+	_, h, err := root.(*DirINode).Create(nil, &fuse.CreateRequest{Name: fileName,
 		Flags: fuse.OpenReadWrite | fuse.OpenCreate, Mode: os.FileMode(0757)}, &fuse.CreateResponse{})
 
 	// file := root.(*Dir).NodeFromAttrs(Attrs{Name: fileName, Mode: os.FileMode(0757)}).(*File)
@@ -59,7 +59,7 @@ func TestFaultTolerantWriteFile(t *testing.T) {
 	mockClock := &MockClock{}
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
 	fileName := "/testWriteFile_1"
-	fs, _ := NewFileSystem(hdfsAccessor, "/", []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
+	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
 
 	hdfswriter := NewMockHdfsWriter(mockCtrl)
 
@@ -76,7 +76,7 @@ func TestFaultTolerantWriteFile(t *testing.T) {
 	}).AnyTimes()
 
 	root, _ := fs.Root()
-	_, h, err := root.(*Dir).Create(nil, &fuse.CreateRequest{Name: fileName,
+	_, h, err := root.(*DirINode).Create(nil, &fuse.CreateRequest{Name: fileName,
 		Flags: fuse.OpenReadWrite | fuse.OpenCreate, Mode: os.FileMode(0757)}, &fuse.CreateResponse{})
 
 	// Test for newfilehandlewriter
@@ -91,7 +91,7 @@ func TestFaultTolerantWriteFile(t *testing.T) {
 	assert.Equal(t, writeHandle.totalBytesWritten, int64(11))
 
 	binaryData := make([]byte, 65536)
-	writeHandle.File.handle.Seek(0, 0)
+	writeHandle.File.handle.SeekToStart()
 	nr, _ := writeHandle.File.handle.Read(binaryData)
 	binaryData = binaryData[:nr]
 
@@ -138,15 +138,16 @@ func TestFlushFile(t *testing.T) {
 	hdfsAccessor.EXPECT().StatFs().Return(FsInfo{capacity: uint64(100), used: uint64(20), remaining: uint64(80)}, nil).AnyTimes()
 	hdfsAccessor.EXPECT().Stat("/testWriteFile_2").Return(Attrs{Name: "testWriteFile_2"}, nil)
 	fileName := "/testWriteFile_2"
-	fs, _ := NewFileSystem(hdfsAccessor, "/", []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
+	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
 
 	hdfsAccessor.EXPECT().Remove(fileName).Return(nil).AnyTimes()
-	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), false).Return(hdfswriter, nil).AnyTimes()
+	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), true).Return(hdfswriter, nil).AnyTimes()
 	hdfswriter.EXPECT().Close().Return(nil).AnyTimes()
+	hdfswriter.EXPECT().Write([]byte("hello world")).Return(0, nil).AnyTimes()
 
 	// Test for newfilehandlewriter with existing file
 	root, _ := fs.Root()
-	file := root.(*Dir).NodeFromAttrs(Attrs{Name: "testWriteFile_2"}).(*File)
+	file := root.(*DirINode).NodeFromAttrs(Attrs{Name: "testWriteFile_2", Mode: os.FileMode(0757)}).(*FileINode)
 	fh, _ := file.Open(nil, &fuse.OpenRequest{}, &fuse.OpenResponse{})
 	fileHandle := fh.(*FileHandle)
 

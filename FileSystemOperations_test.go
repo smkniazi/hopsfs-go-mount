@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"strconv"
@@ -19,13 +20,33 @@ func TestSimple(t *testing.T) {
 	withMount(t, "/", func(mountPoint string, hdfsAccessor HdfsAccessor) {
 		//create a file, make sure that use and group information is correct
 		testFile := filepath.Join(mountPoint, "somefile")
+		os.Remove(testFile)
+
 		loginfo(fmt.Sprintf("New file: %s", testFile), nil)
 		createFile(t, testFile, "some data")
 		fi, _ := os.Stat(testFile)
 		fstat := fi.Sys().(*syscall.Stat_t)
 		grupInfo, _ := user.LookupGroupId(fmt.Sprintf("%d", fstat.Gid))
 		userInfo, _ := user.LookupId(fmt.Sprintf("%d", fstat.Uid))
-		loginfo(fmt.Sprintf("New file: %s, User %s, Gropu %s", testFile, userInfo.Name, grupInfo.Name), nil)
+		loginfo(fmt.Sprintf("---> New file: %s, User %s, Gropu %s", testFile, userInfo.Name, grupInfo.Name), nil)
+
+		loginfo("---> Reopening the file to write some more data", nil)
+		// append some more data
+		c, err := os.OpenFile(testFile, os.O_APPEND, 0600)
+		if err != nil {
+			t.Errorf("Reopening the file failed. File: %s. Error: %v", testFile, err)
+		}
+		c.WriteString("some more data")
+		c.Close()
+
+		loginfo("---> Reopening the file to read all the data", nil)
+		// read all the data again
+		c, _ = os.OpenFile(testFile, os.O_RDWR, 0600)
+		buffer := make([]byte, 1024)
+		c.Read(buffer)
+		c.Close()
+		logdebug(fmt.Sprintf("Data Read. %s", buffer), nil)
+
 		os.Remove(testFile)
 	})
 }
@@ -111,27 +132,58 @@ func TestMountSubDir(t *testing.T) {
 			dir := filepath.Join(mountPoint, "dir"+strconv.Itoa(i))
 			for j := 0; j < filesPdir; j++ {
 				f := filepath.Join(dir, "file"+strconv.Itoa(j))
-				rm(t, f)
+				rmFile(t, f)
 			}
-			rm(t, dir)
+			rmFile(t, dir)
+		}
+	})
+}
+
+func TestGitClone(t *testing.T) {
+	withMount(t, "/", func(mountPoint string, hdfsAccessor HdfsAccessor) {
+
+		cloneDir := "cloneDir"
+		fullPath := filepath.Join(mountPoint, cloneDir)
+
+		//delete the dir if it already exists
+		_, err := os.Stat(fullPath)
+		if os.IsExist(err) {
+			err := rmDir(t, fullPath)
+			if err != nil {
+				t.Errorf("Faile to remove  %s. Error: %v", fullPath, err)
+			}
+		}
+
+		_, err = exec.Command("git", "clone", "https://github.com/logicalclocks/ndb-chef", fullPath).Output()
+		if err != nil {
+			t.Errorf("Unable to clone the repo. Error: %v", err)
+		}
+
+		//clean
+		err = rmDir(t, fullPath)
+		if err != nil {
+			t.Errorf("Faile to remove  %s. Error: %v", fullPath, err)
 		}
 	})
 }
 
 func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor HdfsAccessor)) {
-	hdfsAccessor, err := NewHdfsAccessor("localhost:8020", WallClock{}, TLSConfig{TLS: false})
+	t.Helper()
+	hdfsAccessor, _ := NewHdfsAccessor("localhost:8020", WallClock{}, TLSConfig{TLS: false})
+	err := hdfsAccessor.EnsureConnected()
 	if err != nil {
-		logfatal(fmt.Sprintf("Error/NewHdfsAccessor: %v ", err), nil)
+		t.Fatalf(fmt.Sprintf("Error/NewHdfsAccessor: %v ", err), nil)
 	}
 
 	// Wrapping with FaultTolerantHdfsAccessor
 	retryPolicy := NewDefaultRetryPolicy(WallClock{})
+	retryPolicy.MaxAttempts = 1 // for quick failure
 	ftHdfsAccessor := NewFaultTolerantHdfsAccessor(hdfsAccessor, retryPolicy)
 
 	// Creating the virtual file system
-	fileSystem, err := NewFileSystem(ftHdfsAccessor, srcDir, []string{"*"}, false, false, retryPolicy, WallClock{})
+	fileSystem, err := NewFileSystem([]HdfsAccessor{ftHdfsAccessor}, srcDir, []string{"*"}, false, false, retryPolicy, WallClock{})
 	if err != nil {
-		logfatal(fmt.Sprintf("Error/NewFileSystem: %v ", err), nil)
+		t.Fatalf(fmt.Sprintf("Error/NewFileSystem: %v ", err), nil)
 	}
 
 	mountOptions := getMountOptions(false)
@@ -173,10 +225,38 @@ func listDir(t testing.TB, dir string) []fs.FileInfo {
 	return content
 }
 
-func rm(t testing.TB, path string) {
+func rmFile(t testing.TB, path string) {
 	t.Helper()
 	err := os.Remove(path)
 	if err != nil {
 		t.Errorf("Faile to remove  %s. Error: %v", path, err)
 	}
+}
+
+func rmDir(t testing.TB, dir string) error {
+	t.Helper()
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+
+	names, err := d.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+
+	for _, name := range names {
+		err = os.RemoveAll(filepath.Join(dir, name))
+		if err != nil {
+			return err
+		}
+	}
+
+	err = os.Remove(dir)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

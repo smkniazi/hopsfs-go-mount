@@ -43,7 +43,7 @@ func TestZipDirReadArchive(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockClock := &MockClock{}
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
-	fs, _ := NewFileSystem(hdfsAccessor, "/", []string{"*"}, true, false, NewDefaultRetryPolicy(mockClock), mockClock)
+	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"*"}, true, false, NewDefaultRetryPolicy(mockClock), mockClock)
 	zipFile, err := os.Open(testZipPath())
 	assert.Nil(t, err)
 	zipFileInfo, err := zipFile.Stat()
@@ -51,7 +51,7 @@ func TestZipDirReadArchive(t *testing.T) {
 	hdfsAccessor.EXPECT().Stat("/test.zip").Return(Attrs{Name: "test.zip", Size: uint64(zipFileInfo.Size()), Uid: uint32(500), Gid: uint32(500)}, nil).AnyTimes()
 	hdfsAccessor.EXPECT().OpenRead("/test.zip").Return(ReadSeekCloser(&FileAsReadSeekCloser{File: zipFile}), err).AnyTimes()
 	root, err := fs.Root()
-	zipRootDirNode, err := root.(*Dir).Lookup(nil, "test.zip@")
+	zipRootDirNode, err := root.(*DirINode).Lookup(nil, "test.zip@")
 	assert.Nil(t, err)
 	zipRootDir := zipRootDirNode.(*ZipDir)
 

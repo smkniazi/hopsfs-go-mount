@@ -17,24 +17,24 @@ import (
 )
 
 // Encapsulates state and operations for directory node on the HDFS file system
-type Dir struct {
-	FileSystem   *FileSystem         // Pointer to the owning filesystem
-	Attrs        Attrs               // Cached attributes of the directory, TODO: add TTL
-	Parent       *Dir                // Pointer to the parent directory (allows computing fully-qualified paths on demand)
-	Entries      map[string]*fs.Node // Cahed directory entries
-	EntriesMutex sync.Mutex          // Used to protect Entries
+type DirINode struct {
+	FileSystem *FileSystem         // Pointer to the owning filesystem
+	Attrs      Attrs               // Cached attributes of the directory, TODO: add TTL
+	Parent     *DirINode           // Pointer to the parent directory (allows computing fully-qualified paths on demand)
+	Entries    map[string]*fs.Node // Cahed directory entries
+	mutex      sync.Mutex          // One read or write operation on a directory at a time
 }
 
 // Verify that *Dir implements necesary FUSE interfaces
-var _ fs.Node = (*Dir)(nil)
-var _ fs.HandleReadDirAller = (*Dir)(nil)
-var _ fs.NodeStringLookuper = (*Dir)(nil)
-var _ fs.NodeMkdirer = (*Dir)(nil)
-var _ fs.NodeRemover = (*Dir)(nil)
-var _ fs.NodeRenamer = (*Dir)(nil)
+var _ fs.Node = (*DirINode)(nil)
+var _ fs.HandleReadDirAller = (*DirINode)(nil)
+var _ fs.NodeStringLookuper = (*DirINode)(nil)
+var _ fs.NodeMkdirer = (*DirINode)(nil)
+var _ fs.NodeRemover = (*DirINode)(nil)
+var _ fs.NodeRenamer = (*DirINode)(nil)
 
 // Returns absolute path of the dir in HDFS namespace
-func (dir *Dir) AbsolutePath() string {
+func (dir *DirINode) AbsolutePath() string {
 	if dir.Parent == nil {
 		return dir.FileSystem.SrcDir
 	} else {
@@ -43,7 +43,7 @@ func (dir *Dir) AbsolutePath() string {
 }
 
 // Returns absolute path of the child item of this directory
-func (dir *Dir) AbsolutePathForChild(name string) string {
+func (dir *DirINode) AbsolutePathForChild(name string) string {
 	path := dir.AbsolutePath()
 	if path != "/" {
 		path = path + "/"
@@ -52,7 +52,9 @@ func (dir *Dir) AbsolutePathForChild(name string) string {
 }
 
 // Responds on FUSE request to get directory attributes
-func (dir *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
+func (dir *DirINode) Attr(ctx context.Context, a *fuse.Attr) error {
+	dir.lockMutex()
+	defer dir.unlockMutex()
 	if dir.Parent != nil && dir.FileSystem.Clock.Now().After(dir.Attrs.Expires) {
 		err := dir.Parent.LookupAttrs(dir.Attrs.Name, &dir.Attrs)
 		if err != nil {
@@ -63,9 +65,7 @@ func (dir *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
 	return dir.Attrs.Attr(a)
 }
 
-func (dir *Dir) EntriesGet(name string) *fs.Node {
-	dir.EntriesMutex.Lock()
-	defer dir.EntriesMutex.Unlock()
+func (dir *DirINode) EntriesGet(name string) *fs.Node {
 	if dir.Entries == nil {
 		dir.Entries = make(map[string]*fs.Node)
 		return nil
@@ -73,10 +73,7 @@ func (dir *Dir) EntriesGet(name string) *fs.Node {
 	return dir.Entries[name]
 }
 
-func (dir *Dir) EntriesSet(name string, node *fs.Node) {
-	dir.EntriesMutex.Lock()
-	defer dir.EntriesMutex.Unlock()
-
+func (dir *DirINode) EntriesSet(name string, node *fs.Node) {
 	if dir.Entries == nil {
 		dir.Entries = make(map[string]*fs.Node)
 	}
@@ -84,33 +81,31 @@ func (dir *Dir) EntriesSet(name string, node *fs.Node) {
 	dir.Entries[name] = node
 }
 
-func (dir *Dir) EntriesUpdate(name string, attr Attrs) {
-	dir.EntriesMutex.Lock()
-	defer dir.EntriesMutex.Unlock()
-
+func (dir *DirINode) EntriesUpdate(name string, attr Attrs) {
 	if dir.Entries == nil {
 		dir.Entries = make(map[string]*fs.Node)
 	}
 
 	if node, ok := dir.Entries[name]; ok {
-		if fnode, ok := (*node).(*File); ok {
+		if fnode, ok := (*node).(*FileINode); ok {
 			fnode.Attrs = attr
-		} else if dnode, ok := (*node).(*Dir); ok {
+		} else if dnode, ok := (*node).(*DirINode); ok {
 			dnode.Attrs = attr
 		}
 	}
 }
 
-func (dir *Dir) EntriesRemove(name string) {
-	dir.EntriesMutex.Lock()
-	defer dir.EntriesMutex.Unlock()
+func (dir *DirINode) EntriesRemove(name string) {
 	if dir.Entries != nil {
 		delete(dir.Entries, name)
 	}
 }
 
 // Responds on FUSE request to lookup the directory
-func (dir *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
+func (dir *DirINode) Lookup(ctx context.Context, name string) (fs.Node, error) {
+	dir.lockMutex()
+	defer dir.unlockMutex()
+
 	if !dir.FileSystem.IsPathAllowed(dir.AbsolutePathForChild(name)) {
 		return nil, fuse.ENOENT
 	}
@@ -126,7 +121,7 @@ func (dir *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		zipFile, ok := zipFileNode.(*File)
+		zipFile, ok := zipFileNode.(*FileINode)
 		if !ok {
 			return nil, fuse.ENOENT
 		}
@@ -146,11 +141,14 @@ func (dir *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 }
 
 // Responds on FUSE request to read directory
-func (dir *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
+func (dir *DirINode) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
+	dir.lockMutex()
+	defer dir.unlockMutex()
+
 	absolutePath := dir.AbsolutePath()
 	loginfo("Read directory", Fields{Operation: ReadDir, Path: absolutePath})
 
-	allAttrs, err := dir.FileSystem.HdfsAccessor.ReadDir(absolutePath)
+	allAttrs, err := dir.FileSystem.getDFSConnector().ReadDir(absolutePath)
 	if err != nil {
 		logwarn("Failed to list DFS directory", Fields{Operation: ReadDir, Path: absolutePath, Error: err})
 		return nil, err
@@ -184,12 +182,12 @@ func (dir *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 }
 
 // Creates typed node (Dir or File) from the attributes
-func (dir *Dir) NodeFromAttrs(attrs Attrs) fs.Node {
+func (dir *DirINode) NodeFromAttrs(attrs Attrs) fs.Node {
 	var node fs.Node
 	if (attrs.Mode & os.ModeDir) == 0 {
-		node = &File{FileSystem: dir.FileSystem, Parent: dir, Attrs: attrs}
+		node = &FileINode{FileSystem: dir.FileSystem, Parent: dir, Attrs: attrs}
 	} else {
-		node = &Dir{FileSystem: dir.FileSystem, Parent: dir, Attrs: attrs}
+		node = &DirINode{FileSystem: dir.FileSystem, Parent: dir, Attrs: attrs}
 	}
 
 	if n := dir.EntriesGet(attrs.Name); n != nil {
@@ -202,9 +200,10 @@ func (dir *Dir) NodeFromAttrs(attrs Attrs) fs.Node {
 }
 
 // Performs Stat() query on the backend
-func (dir *Dir) LookupAttrs(name string, attrs *Attrs) error {
+func (dir *DirINode) LookupAttrs(name string, attrs *Attrs) error {
+
 	var err error
-	*attrs, err = dir.FileSystem.HdfsAccessor.Stat(path.Join(dir.AbsolutePath(), name))
+	*attrs, err = dir.FileSystem.getDFSConnector().Stat(path.Join(dir.AbsolutePath(), name))
 	if err != nil {
 		// It is a warning as each time new file write tries to stat if the file exists
 		loginfo("Stat failed", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name), Error: err})
@@ -218,8 +217,11 @@ func (dir *Dir) LookupAttrs(name string, attrs *Attrs) error {
 }
 
 // Responds on FUSE Mkdir request
-func (dir *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, error) {
-	err := dir.FileSystem.HdfsAccessor.Mkdir(dir.AbsolutePathForChild(req.Name), req.Mode)
+func (dir *DirINode) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, error) {
+	dir.lockMutex()
+	defer dir.unlockMutex()
+
+	err := dir.FileSystem.getDFSConnector().Mkdir(dir.AbsolutePathForChild(req.Name), req.Mode)
 	if err != nil {
 		return nil, err
 	}
@@ -227,13 +229,16 @@ func (dir *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, err
 }
 
 // Responds on FUSE Create request
-func (dir *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
-	loginfo("Creating a new file", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags})
+func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error) {
+	dir.lockMutex()
+	defer dir.unlockMutex()
 
-	file := dir.NodeFromAttrs(Attrs{Name: req.Name, Mode: req.Mode}).(*File)
-	handle, err := NewFileHandle(file, false, req.Flags)
+	loginfo("Creating a new file", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags})
+	file := dir.NodeFromAttrs(Attrs{Name: req.Name, Mode: req.Mode}).(*FileINode)
+	handle, err := file.NewFileHandle(false, req.Flags)
 	if err != nil {
 		logerror("File creation failed", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags, Error: err})
+		//TODO remove the entry from the cache
 		return nil, nil, err
 	}
 	file.AddHandle(handle)
@@ -241,41 +246,50 @@ func (dir *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.
 }
 
 // Responds on FUSE Remove request
-func (dir *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
+func (dir *DirINode) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
+	dir.lockMutex()
+	defer dir.unlockMutex()
+
 	path := dir.AbsolutePathForChild(req.Name)
 	loginfo("Removing path", Fields{Operation: Remove, Path: path})
-	err := dir.FileSystem.HdfsAccessor.Remove(path)
+	err := dir.FileSystem.getDFSConnector().Remove(path)
 	if err == nil {
 		dir.EntriesRemove(req.Name)
 	} else {
-		logerror("Failed to remove path", Fields{Operation: Remove, Path: path, Error: err})
+		logwarn("Failed to remove path", Fields{Operation: Remove, Path: path, Error: err})
 	}
 	return err
 }
 
 // Responds on FUSE Rename request
-func (dir *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.Node) error {
+func (dir *DirINode) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.Node) error {
+	dir.lockMutex()
+	defer dir.unlockMutex()
+
 	oldPath := dir.AbsolutePathForChild(req.OldName)
-	newPath := newDir.(*Dir).AbsolutePathForChild(req.NewName)
+	newPath := newDir.(*DirINode).AbsolutePathForChild(req.NewName)
 	loginfo("Renaming to "+newPath, Fields{Operation: Rename, Path: oldPath})
-	err := dir.FileSystem.HdfsAccessor.Rename(oldPath, newPath)
+	err := dir.FileSystem.getDFSConnector().Rename(oldPath, newPath)
 	if err == nil {
 		// Upon successful rename, updating in-memory representation of the file entry
 		if node := dir.EntriesGet(req.OldName); node != nil {
-			if fnode, ok := (*node).(*File); ok {
+			if fnode, ok := (*node).(*FileINode); ok {
 				fnode.Attrs.Name = req.NewName
-			} else if dnode, ok := (*node).(*Dir); ok {
+			} else if dnode, ok := (*node).(*DirINode); ok {
 				dnode.Attrs.Name = req.NewName
 			}
 			dir.EntriesRemove(req.OldName)
-			newDir.(*Dir).EntriesSet(req.NewName, node)
+			newDir.(*DirINode).EntriesSet(req.NewName, node)
 		}
 	}
 	return err
 }
 
 // Responds on FUSE Chmod request
-func (dir *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
+func (dir *DirINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
+	dir.lockMutex()
+	defer dir.unlockMutex()
+
 	// Get the filepath, so chmod in hdfs can work
 	path := dir.AbsolutePath()
 	var err error
@@ -283,7 +297,7 @@ func (dir *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fus
 	if req.Valid.Mode() {
 		loginfo("Setting attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode})
 		(func() {
-			err = dir.FileSystem.HdfsAccessor.Chmod(path, req.Mode)
+			err = dir.FileSystem.getDFSConnector().Chmod(path, req.Mode)
 			if err != nil {
 				return
 			}
@@ -310,7 +324,7 @@ func (dir *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fus
 
 		loginfo("Setting attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group})
 		(func() {
-			err = dir.FileSystem.HdfsAccessor.Chown(path, owner, group)
+			err = dir.FileSystem.getDFSConnector().Chown(path, owner, group)
 			if err != nil {
 				return
 			}
@@ -325,4 +339,14 @@ func (dir *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fus
 	}
 
 	return err
+}
+
+var dirLockTime time.Time = time.Time{}
+
+func (dir *DirINode) lockMutex() {
+	dir.mutex.Lock()
+}
+
+func (dir *DirINode) unlockMutex() {
+	dir.mutex.Unlock()
 }

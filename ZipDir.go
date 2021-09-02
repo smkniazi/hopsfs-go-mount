@@ -15,7 +15,7 @@ import (
 // Encapsulates state and operations for a directory inside a zip file on HDFS file system
 type ZipDir struct {
 	Attrs            Attrs               // Attributes of the directory
-	ZipContainerFile *File               // Zip container file node
+	ZipContainerFile *FileINode          // Zip container file node
 	IsRoot           bool                // true if this ZipDir represents archive root
 	SubDirs          map[string]*ZipDir  // Sub-directories (immediate children)
 	Files            map[string]*ZipFile // Files in this directory
@@ -29,7 +29,7 @@ var _ fs.HandleReadDirAller = (*ZipDir)(nil)
 var _ fs.NodeStringLookuper = (*ZipDir)(nil)
 
 // Creates root dir node for zip archive
-func NewZipRootDir(zipContainerFile *File, attrs Attrs) *ZipDir {
+func NewZipRootDir(zipContainerFile *FileINode, attrs Attrs) *ZipDir {
 	return &ZipDir{
 		IsRoot:           true,
 		ZipContainerFile: zipContainerFile,

@@ -3,24 +3,18 @@
 package main
 
 import (
-	"fmt"
 	"io"
-	"io/ioutil"
-	"math/rand"
-	"os"
 	"sync"
-	"syscall"
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"golang.org/x/net/context"
-	"golang.org/x/sys/unix"
 )
 
 // Represends a handle to an open file
 type FileHandle struct {
-	File              *File
-	Mutex             sync.Mutex     // all operations on the handle are serialized to simplify invariants
+	File              *FileINode
+	mutex             sync.Mutex     // all operations on the handle are serialized to simplify invariants
 	fileFlags         fuse.OpenFlags // flags used to creat the file
 	tatalBytesRead    int64
 	totalBytesWritten int64
@@ -35,92 +29,8 @@ var _ fs.HandleWriter = (*FileHandle)(nil)
 var _ fs.NodeFsyncer = (*FileHandle)(nil)
 var _ fs.HandleFlusher = (*FileHandle)(nil)
 
-func (fh *FileHandle) createStagingFile(operation string, existsInDFS bool) error {
-	if fh.File.handle != nil {
-		return nil // there is already an active handle.
-	}
-
-	//create staging file
-	absPath := fh.File.AbsolutePath()
-	hdfsAccessor := fh.File.FileSystem.HdfsAccessor
-	if !existsInDFS { // it  is a new file so create it in the DFS
-		w, err := hdfsAccessor.CreateFile(absPath, fh.File.Attrs.Mode, false)
-		if err != nil {
-			logerror("Failed to create file in DFS", fh.logInfo(Fields{Operation: operation, Error: err}))
-			return err
-		}
-		loginfo("Created an empty file in DFS", fh.logInfo(Fields{Operation: operation}))
-		w.Close()
-	} else {
-		// Request to write to existing file
-		_, err := hdfsAccessor.Stat(absPath)
-		if err != nil {
-			logerror("Failed to stat file in DFS", fh.logInfo(Fields{Operation: operation, Error: err}))
-			return syscall.ENOENT
-		}
-	}
-
-	stagingFile, err := ioutil.TempFile(stagingDir, "stage")
-	if err != nil {
-		logerror("Failed to create staging file", fh.logInfo(Fields{Operation: operation, Error: err}))
-		return err
-	}
-	os.Remove(stagingFile.Name())
-	loginfo("Created staging file", fh.logInfo(Fields{Operation: operation, TmpFile: stagingFile.Name()}))
-
-	if existsInDFS {
-		if err := fh.downloadToStaging(stagingFile, operation); err != nil {
-			return err
-		}
-	}
-	fh.File.handle = stagingFile
-	return nil
-}
-
-func (fh *FileHandle) downloadToStaging(stagingFile *os.File, operation string) error {
-	hdfsAccessor := fh.File.FileSystem.HdfsAccessor
-	absPath := fh.File.AbsolutePath()
-
-	reader, err := hdfsAccessor.OpenRead(absPath)
-	if err != nil {
-		logerror("Failed to open file in DFS", fh.logInfo(Fields{Operation: operation, Error: err}))
-		// TODO remove the staging file if there are no more active handles
-		return err
-	}
-
-	nc, err := io.Copy(stagingFile, reader)
-	if err != nil {
-		logerror("Failed to copy content to staging file", fh.logInfo(Fields{Operation: operation, Error: err}))
-		return err
-	}
-	reader.Close()
-	loginfo(fmt.Sprintf("Downloaded a copy to stating dir. %d bytes copied", nc), fh.logInfo(Fields{Operation: operation}))
-	return nil
-}
-
-// Creates new file handle
-func NewFileHandle(file *File, existsInDFS bool, flags fuse.OpenFlags) (*FileHandle, error) {
-
-	operation := Create
-	if existsInDFS {
-		operation = Open
-	}
-
-	fh := &FileHandle{File: file, fileFlags: flags, fhID: int64(rand.Uint64())}
-	if err := checkDiskSpace(); err != nil {
-		return nil, err
-	}
-
-	if err := fh.createStagingFile(operation, existsInDFS); err != nil {
-		return nil, err
-	}
-
-	loginfo("Opened file", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags}))
-	return fh, nil
-}
-
-func (fh *FileHandle) isWriteable() bool {
-	if fh.fileFlags.IsWriteOnly() || fh.fileFlags.IsReadWrite() {
+func (fh *FileHandle) dataChanged() bool {
+	if fh.totalBytesWritten > 0 {
 		return true
 	} else {
 		return false
@@ -136,33 +46,17 @@ func (fh *FileHandle) Truncate(size int64) error {
 	return nil
 }
 
-func checkDiskSpace() error {
-	var stat unix.Statfs_t
-	wd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	unix.Statfs(wd, &stat)
-	// Available blocks * size per block = available space in bytes
-	bytesAvailable := stat.Bavail * uint64(stat.Bsize)
-	if bytesAvailable < 64*1024*1024 {
-		return syscall.ENOSPC
-	} else {
-		return nil
-	}
-}
-
 // Returns attributes of the file associated with this handle
 func (fh *FileHandle) Attr(ctx context.Context, a *fuse.Attr) error {
-	fh.Mutex.Lock()
-	defer fh.Mutex.Unlock()
+	fh.lockHandle()
+	defer fh.unlockHandle()
 	return fh.File.Attr(ctx, a)
 }
 
 // Responds to FUSE Read request
 func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
-	fh.Mutex.Lock()
-	defer fh.Mutex.Unlock()
+	fh.lockHandle()
+	defer fh.unlockHandle()
 
 	buf := resp.Data[0:req.Size]
 	nr, err := fh.File.handle.ReadAt(buf, req.Offset)
@@ -172,21 +66,23 @@ func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fus
 	if err != nil {
 		if err == io.EOF {
 			// EOF isn't a error, reporting successful read to FUSE
-			logdebug("Finished reading from staging file. EOF", fh.logInfo(Fields{Operation: Read, Bytes: nr}))
+			logdebug("Completed reading", fh.logInfo(Fields{Operation: Read, Error: err, Bytes: nr}))
 			return nil
 		} else {
-			logerror("Failed to read from staging file", fh.logInfo(Fields{Operation: Read, Error: err, Bytes: nr}))
+			logerror("Failed to read", fh.logInfo(Fields{Operation: Read, Error: err, Bytes: nr}))
 			return err
 		}
 	}
-	logdebug("Read from staging file", fh.logInfo(Fields{Operation: Read, Bytes: nr, ReqOffset: req.Offset}))
 	return err
 }
 
 // Responds to FUSE Write request
 func (fh *FileHandle) Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error {
-	fh.Mutex.Lock()
-	defer fh.Mutex.Unlock()
+	fh.lockHandle()
+	defer fh.unlockHandle()
+
+	// as an optimization the file is initially opened in readonly mode
+	fh.File.upgradeHandleForWriting()
 
 	nw, err := fh.File.handle.WriteAt(req.Data, req.Offset)
 	resp.Size = nw
@@ -215,13 +111,13 @@ func (fh *FileHandle) copyToDFS(operation string) error {
 			return err
 		}
 		// Reconnect and try again
-		fh.File.FileSystem.HdfsAccessor.Close()
+		fh.File.FileSystem.getDFSConnector().Close()
 		logwarn("Failed to copy file to DFS", fh.logInfo(Fields{Operation: operation}))
 	}
 }
 
 func (fh *FileHandle) FlushAttempt(operation string) error {
-	hdfsAccessor := fh.File.FileSystem.HdfsAccessor
+	hdfsAccessor := fh.File.FileSystem.getDFSConnector()
 	w, err := hdfsAccessor.CreateFile(fh.File.AbsolutePath(), fh.File.Attrs.Mode, true)
 	if err != nil {
 		logerror("Error creating file in DFS", fh.logInfo(Fields{Operation: operation, Error: err}))
@@ -229,9 +125,9 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 	}
 
 	//open the file for reading and upload to DFS
-	offset, err := fh.File.handle.Seek(0, 0)
-	if err != nil || offset != 0 {
-		logerror("Unable to seek to the begenning of the temp file", fh.logInfo(Fields{Operation: operation, Offset: offset, Error: err}))
+	err = fh.File.handle.SeekToStart()
+	if err != nil {
+		logerror("Unable to seek to the begenning of the temp file", fh.logInfo(Fields{Operation: operation, Error: err}))
 		return err
 	}
 
@@ -268,9 +164,9 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 
 // Responds to the FUSE Flush request
 func (fh *FileHandle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
-	fh.Mutex.Lock()
-	defer fh.Mutex.Unlock()
-	if fh.isWriteable() {
+	fh.lockHandle()
+	defer fh.unlockHandle()
+	if fh.dataChanged() {
 		loginfo("Flush file", fh.logInfo(Fields{Operation: Flush}))
 		return fh.copyToDFS(Flush)
 	} else {
@@ -280,9 +176,9 @@ func (fh *FileHandle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 
 // Responds to the FUSE Fsync request
 func (fh *FileHandle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
-	fh.Mutex.Lock()
-	defer fh.Mutex.Unlock()
-	if fh.isWriteable() {
+	fh.lockHandle()
+	defer fh.unlockHandle()
+	if fh.dataChanged() {
 		loginfo("Fsync file", fh.logInfo(Fields{Operation: Fsync}))
 		return fh.copyToDFS(Fsync)
 	} else {
@@ -292,8 +188,8 @@ func (fh *FileHandle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
 
 // Closes the handle
 func (fh *FileHandle) Release(_ context.Context, _ *fuse.ReleaseRequest) error {
-	fh.Mutex.Lock()
-	defer fh.Mutex.Unlock()
+	fh.lockHandle()
+	defer fh.unlockHandle()
 
 	//close the file handle if it is the last handle
 	fh.File.InvalidateMetadataCache()
@@ -320,4 +216,12 @@ func (fh *FileHandle) logInfo(fields Fields) Fields {
 		f[k] = e
 	}
 	return f
+}
+
+func (fh *FileHandle) lockHandle() {
+	fh.mutex.Lock()
+}
+
+func (fh *FileHandle) unlockHandle() {
+	fh.mutex.Unlock()
 }

@@ -2,7 +2,7 @@ package main
 
 var (
 	//TODO: Add Version tag, manually update
-	VERSION = "1.1.0"
+	VERSION = "1.2.0"
 
 	// GITCommit overwritten automatically by the build
 	GITCOMMIT = "HEAD"

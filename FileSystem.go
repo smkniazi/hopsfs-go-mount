@@ -148,6 +148,5 @@ func (filesystem *FileSystem) Statfs(ctx context.Context, req *fuse.StatfsReques
 func (filesystem *FileSystem) getDFSConnector() HdfsAccessor {
 	filesystem.hdfsAccessorsIndex = filesystem.hdfsAccessorsIndex + 1
 	index := filesystem.hdfsAccessorsIndex % len(filesystem.HdfsAccessors)
-	loginfo(fmt.Sprintf("Client index %d. len %d", index, len(filesystem.HdfsAccessors)), nil)
 	return filesystem.HdfsAccessors[index]
 }

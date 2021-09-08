@@ -14,6 +14,7 @@ import (
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"golang.org/x/net/context"
+	"logicalclocks.com/hopsfs-mount/ugcache"
 )
 
 // Encapsulates state and operations for directory node on the HDFS file system
@@ -206,7 +207,7 @@ func (dir *DirINode) LookupAttrs(name string, attrs *Attrs) error {
 	*attrs, err = dir.FileSystem.getDFSConnector().Stat(path.Join(dir.AbsolutePath(), name))
 	if err != nil {
 		// It is a warning as each time new file write tries to stat if the file exists
-		loginfo("Stat failed", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name), Error: err})
+		loginfo("stat failed", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name), Error: err})
 		return err
 	}
 
@@ -223,8 +224,16 @@ func (dir *DirINode) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node
 
 	err := dir.FileSystem.getDFSConnector().Mkdir(dir.AbsolutePathForChild(req.Name), req.Mode)
 	if err != nil {
+		loginfo("mkdir failed", Fields{Operation: Mkdir, Path: path.Join(dir.AbsolutePath(), req.Name), Error: err})
 		return nil, err
 	}
+	logdebug("mkdir successful", Fields{Operation: Mkdir, Path: path.Join(dir.AbsolutePath(), req.Name)})
+
+	err = dir.changeOwnership(dir.AbsolutePathForChild(req.Name), req.Uid, req.Gid)
+	if err != nil {
+		return nil, err
+	}
+
 	return dir.NodeFromAttrs(Attrs{Name: req.Name, Mode: req.Mode | os.ModeDir}), nil
 }
 
@@ -242,7 +251,27 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 		return nil, nil, err
 	}
 	file.AddHandle(handle)
+
+	err = dir.changeOwnership(dir.AbsolutePathForChild(req.Name), req.Uid, req.Gid)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	return file, handle, nil
+}
+
+func (dir *DirINode) changeOwnership(path string, uid uint32, gid uint32) error {
+	if hadoopUserID != uid { // the file is created by an other user, so change the ownership information
+		user := ugcache.LookupUserName(uid)
+		group := ugcache.LookupGroupName(gid)
+		err := dir.FileSystem.getDFSConnector().Chown(path, user, group)
+		if err != nil {
+			dir.FileSystem.getDFSConnector().Remove(dir.AbsolutePathForChild(path))
+			return err
+		}
+		loginfo("Update ownership", Fields{Operation: Create, Path: path, User: user, Group: group})
+	}
+	return nil
 }
 
 // Responds on FUSE Remove request

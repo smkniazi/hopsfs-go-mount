@@ -106,6 +106,10 @@ func (dfs *hdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 		hadoopUserName = u
 	}
 	hadoopUserID = ugcache.LookupUId(hadoopUserName)
+	if hadoopUserName != "root" && hadoopUserID == 0 {
+		logwarn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", hadoopUserName), nil)
+	}
+
 	loginfo(fmt.Sprintf("Connecting as user: %s, UID: %d", hadoopUserName, hadoopUserID), nil)
 
 	// Performing an attempt to connect to the name node
@@ -261,16 +265,26 @@ func (dfs *hdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 	}
 
 	modificationTime := time.Unix(int64(fi.ModificationTime())/1000, 0)
+	gid := ugcache.LookupGid(fi.OwnerGroup())
+	if fi.OwnerGroup() != "root" && gid == 0 {
+		logwarn(fmt.Sprintf("Unable to find group id for group: %s, returning gid: 0", fi.OwnerGroup()), nil)
+	}
+
+	uid := ugcache.LookupUId(fi.Owner())
+	if fi.Owner() != "root" && uid == 0 {
+		logwarn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", fi.Owner()), nil)
+	}
+
 	return Attrs{
 		Inode:  fi.FileId(),
 		Name:   fileInfo.Name(),
 		Mode:   mode,
 		Size:   fi.Length(),
-		Uid:    ugcache.LookupUId(fi.Owner()),
+		Uid:    uid,
 		Mtime:  modificationTime,
 		Ctime:  modificationTime,
 		Crtime: modificationTime,
-		Gid:    ugcache.LookupGid(fi.OwnerGroup())}
+		Gid:    gid}
 }
 
 func (dfs *hdfsAccessorImpl) AttrsFromFsInfo(fsInfo hdfs.FsInfo) FsInfo {

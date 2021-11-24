@@ -118,6 +118,16 @@ func (fh *FileHandle) copyToDFS(operation string) error {
 
 func (fh *FileHandle) FlushAttempt(operation string) error {
 	hdfsAccessor := fh.File.FileSystem.getDFSConnector()
+	//delete the file and then rewrite.
+	//note we can not rely on the overwrite functionality of CreateFile API.
+	//For example if the file has permission set to 444 then we can not overwrite it
+	err := hdfsAccessor.Remove(fh.File.AbsolutePath())
+	if err != nil {
+		// may be this is a retry and the file has already been deleted
+		// log error and continue
+		logwarn("Unable to delete the file during flush.", fh.logInfo(Fields{Operation: operation, Error: err}))
+	}
+
 	w, err := hdfsAccessor.CreateFile(fh.File.AbsolutePath(), fh.File.Attrs.Mode, true)
 	if err != nil {
 		logerror("Error creating file in DFS", fh.logInfo(Fields{Operation: operation, Error: err}))

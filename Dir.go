@@ -231,6 +231,9 @@ func (dir *DirINode) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node
 
 	err = dir.changeOwnership(dir.AbsolutePathForChild(req.Name), req.Uid, req.Gid)
 	if err != nil {
+		logwarn("Unable to change ownership of new dir", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), UID: req.Uid, GID: req.Gid})
+		//unable to change the ownership of the directory. so delete it as the operation as a whole failed
+		dir.FileSystem.getDFSConnector().Remove(dir.AbsolutePathForChild(req.Name))
 		return nil, err
 	}
 
@@ -254,6 +257,9 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 
 	err = dir.changeOwnership(dir.AbsolutePathForChild(req.Name), req.Uid, req.Gid)
 	if err != nil {
+		logwarn("Unable to change ownership of new file", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), UID: req.Uid, GID: req.Gid})
+		//unable to change the ownership of the file. so delete it as the operation as a whole failed
+		dir.FileSystem.getDFSConnector().Remove(dir.AbsolutePathForChild(req.Name))
 		return nil, nil, err
 	}
 
@@ -263,13 +269,18 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 func (dir *DirINode) changeOwnership(path string, uid uint32, gid uint32) error {
 	if hadoopUserID != uid { // the file is created by an other user, so change the ownership information
 		user := ugcache.LookupUserName(uid)
+		if user == "" {
+			logwarn("Unable to find user information", Fields{Operation: Chown, Path: path, UID: uid, GID: gid})
+		}
 		group := ugcache.LookupGroupName(gid)
+		if group == "" {
+			logwarn("Unable to find group information", Fields{Operation: Chown, Path: path, UID: uid, GID: gid})
+		}
 		err := dir.FileSystem.getDFSConnector().Chown(path, user, group)
 		if err != nil {
-			dir.FileSystem.getDFSConnector().Remove(dir.AbsolutePathForChild(path))
 			return err
 		}
-		loginfo("Update ownership", Fields{Operation: Create, Path: path, User: user, Group: group})
+		loginfo("Updated ownership", Fields{Operation: Create, Path: path, User: user, Group: group})
 	}
 	return nil
 }
@@ -304,8 +315,10 @@ func (dir *DirINode) Rename(ctx context.Context, req *fuse.RenameRequest, newDir
 		if node := dir.EntriesGet(req.OldName); node != nil {
 			if fnode, ok := (*node).(*FileINode); ok {
 				fnode.Attrs.Name = req.NewName
+				fnode.Parent = newDir.(*DirINode)
 			} else if dnode, ok := (*node).(*DirINode); ok {
 				dnode.Attrs.Name = req.NewName
+				dnode.Parent = newDir.(*DirINode)
 			}
 			dir.EntriesRemove(req.OldName)
 			newDir.(*DirINode).EntriesSet(req.NewName, node)

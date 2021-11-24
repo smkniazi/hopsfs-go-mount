@@ -137,7 +137,7 @@ func LookupGroupName(gid uint32) string {
 func CurrentUserName() (string, error) {
 	u, err := user.Current()
 	if err != nil {
-		return "", fmt.Errorf("Couldn't determine user: %s", err)
+		return "", fmt.Errorf("couldn't determine user: %s", err)
 	}
 	return u.Username, nil
 }

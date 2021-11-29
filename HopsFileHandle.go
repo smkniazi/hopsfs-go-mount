@@ -82,7 +82,7 @@ func (fh *FileHandle) Write(ctx context.Context, req *fuse.WriteRequest, resp *f
 	defer fh.unlockHandle()
 
 	// as an optimization the file is initially opened in readonly mode
-	fh.File.upgradeHandleForWriting()
+	fh.File.upgradeHandleForWriting(fh)
 
 	nw, err := fh.File.handle.WriteAt(req.Data, req.Offset)
 	resp.Size = nw
@@ -204,19 +204,8 @@ func (fh *FileHandle) Release(_ context.Context, _ *fuse.ReleaseRequest) error {
 	//close the file handle if it is the last handle
 	fh.File.InvalidateMetadataCache()
 	fh.File.RemoveHandle(fh)
-	activeHandles := fh.File.countActiveHandles()
-	if activeHandles == 0 {
-		err := fh.File.handle.Close()
-		if err != nil {
-			logerror("Failed to close staging file", fh.logInfo(Fields{Operation: Close, Error: err}))
-		}
-		fh.File.handle = nil
-		loginfo("Staging file is closed", fh.logInfo(Fields{Operation: Close, Flags: fh.fileFlags, TotalBytesRead: fh.tatalBytesRead, TotalBytesWritten: fh.totalBytesWritten}))
-	} else {
-		logdebug("Staging file is not closed becuase it has other active handles ", fh.logInfo(Fields{Operation: Close, Flags: fh.fileFlags, TotalBytesRead: fh.tatalBytesRead, TotalBytesWritten: fh.totalBytesWritten}))
-	}
 
-	loginfo("Close file", fh.logInfo(Fields{Operation: Close, Flags: fh.fileFlags, TotalBytesRead: fh.tatalBytesRead, TotalBytesWritten: fh.totalBytesWritten}))
+	loginfo("Closed file handle ", fh.logInfo(Fields{Operation: Close, Flags: fh.fileFlags, TotalBytesRead: fh.tatalBytesRead, TotalBytesWritten: fh.totalBytesWritten}))
 	return nil
 }
 

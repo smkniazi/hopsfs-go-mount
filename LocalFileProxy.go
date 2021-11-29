@@ -43,8 +43,7 @@ func (p *LocalRWFileProxy) Read(b []byte) (n int, err error) {
 }
 
 func (p *LocalRWFileProxy) Close() error {
-	p.file.lockFileHandles()
-	defer p.file.unlockFileHandles()
+	//NOTE: Locking is done in File.go
 	return p.localFile.Close()
 }
 

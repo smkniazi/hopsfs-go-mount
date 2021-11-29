@@ -67,8 +67,7 @@ func (p *RemoteROFileProxy) Read(b []byte) (n int, err error) {
 }
 
 func (p *RemoteROFileProxy) Close() error {
-	p.file.lockFileHandles()
-	defer p.file.unlockFileHandles()
+	//NOTE: Locking is done in File.go
 	return p.hdfsReader.Close()
 }
 

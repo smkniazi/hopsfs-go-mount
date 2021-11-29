@@ -95,6 +95,9 @@ func (file *FileINode) AddHandle(handle *FileHandle) {
 
 // Unregisters an opened file handle
 func (file *FileINode) RemoveHandle(handle *FileHandle) {
+	file.lockFile()
+	defer file.unlockFile()
+
 	file.lockFileHandles()
 	defer file.unlockFileHandles()
 
@@ -103,6 +106,26 @@ func (file *FileINode) RemoveHandle(handle *FileHandle) {
 			file.activeHandles = append(file.activeHandles[:i], file.activeHandles[i+1:]...)
 			break
 		}
+	}
+
+	//close the staging file if it is the last handle
+	if len(file.activeHandles) == 0 {
+		file.closeStaging()
+		logdebug("Staging file is closed.", file.logInfo(Fields{Operation: Close}))
+	} else {
+		logtrace("Staging file is not closed.", file.logInfo(Fields{Operation: Close}))
+	}
+}
+
+// close staging file
+func (file *FileINode) closeStaging() {
+	if file.handle != nil { // if not already closed
+		err := file.handle.Close()
+		if err != nil {
+			logerror("Failed to close staging file", file.logInfo(Fields{Operation: Close, Error: err}))
+		}
+		file.handle = nil
+		loginfo("Staging file is closed", file.logInfo(Fields{Operation: Close}))
 	}
 }
 
@@ -307,7 +330,7 @@ func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*F
 }
 
 // changes RO file handle to RW
-func (file *FileINode) upgradeHandleForWriting() error {
+func (file *FileINode) upgradeHandleForWriting(me *FileHandle) error {
 	file.lockFileHandles()
 	defer file.unlockFileHandles()
 
@@ -323,6 +346,15 @@ func (file *FileINode) upgradeHandleForWriting() error {
 	if !upgrade {
 		return nil
 	} else {
+
+		//lock n unlock all handles
+		for _, h := range file.activeHandles {
+			if h != me {
+				h.lockHandle()
+				defer h.unlockHandle()
+			}
+		}
+
 		remoteROFileProxy, _ := file.handle.(*RemoteROFileProxy)
 		remoteROFileProxy.hdfsReader.Close() // close this read only handle
 		file.handle = nil

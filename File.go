@@ -50,13 +50,29 @@ func (file *FileINode) Attr(ctx context.Context, a *fuse.Attr) error {
 	file.lockFile()
 	defer file.unlockFile()
 
-	if file.FileSystem.Clock.Now().After(file.Attrs.Expires) {
-		err := file.Parent.LookupAttrs(file.Attrs.Name, &file.Attrs)
+	// if the file is open for writing then update the file length and mtime
+	// from the straging file.
+	// Otherwise read the stats from the cache if it is valid.
+
+	if lrwfp, ok := file.handle.(*LocalRWFileProxy); ok {
+		fileInfo, err := lrwfp.localFile.Stat()
 		if err != nil {
+			logwarn("stat failed on staging file", Fields{Operation: Stat, Path: file.AbsolutePath(), Error: err})
 			return err
 		}
+		// update the local cache
+		file.Attrs.Size = uint64(fileInfo.Size())
+		file.Attrs.Mtime = fileInfo.ModTime()
+	} else {
+		if file.FileSystem.Clock.Now().After(file.Attrs.Expires) {
+			err := file.Parent.LookupAttrs(file.Attrs.Name, &file.Attrs)
+			if err != nil {
+				return err
+			}
+		}
 	}
-	return file.Attrs.Attr(a)
+	return file.Attrs.ConvertAttrToFuse(a)
+
 }
 
 // Responds to the FUSE file open request (creates new file handle)
@@ -111,7 +127,6 @@ func (file *FileINode) RemoveHandle(handle *FileHandle) {
 	//close the staging file if it is the last handle
 	if len(file.activeHandles) == 0 {
 		file.closeStaging()
-		logdebug("Staging file is closed.", file.logInfo(Fields{Operation: Close}))
 	} else {
 		logtrace("Staging file is not closed.", file.logInfo(Fields{Operation: Close}))
 	}
@@ -156,14 +171,14 @@ func (file *FileINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, re
 	defer file.unlockFile()
 
 	if req.Valid.Size() {
-		var retErr error
+		var retErr error = nil
 		for _, handle := range file.activeHandles {
-			if handle.dataChanged() { // to only write enabled handles
-				err := handle.Truncate(int64(req.Size))
-				if err != nil {
-					retErr = err
-				}
+			err := handle.Truncate(int64(req.Size))
+			if err != nil {
+				retErr = err
 			}
+			resp.Attr.Size = req.Size
+			file.Attrs.Size = req.Size
 		}
 		return retErr
 	}
@@ -326,6 +341,7 @@ func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*F
 			loginfo("Opened file, RO handle", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags}))
 		}
 	}
+
 	return fh, nil
 }
 

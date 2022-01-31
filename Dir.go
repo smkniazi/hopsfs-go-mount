@@ -63,7 +63,7 @@ func (dir *DirINode) Attr(ctx context.Context, a *fuse.Attr) error {
 		}
 
 	}
-	return dir.Attrs.Attr(a)
+	return dir.Attrs.ConvertAttrToFuse(a)
 }
 
 func (dir *DirINode) EntriesGet(name string) *fs.Node {
@@ -260,6 +260,12 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 		logwarn("Unable to change ownership of new file", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), UID: req.Uid, GID: req.Gid})
 		//unable to change the ownership of the file. so delete it as the operation as a whole failed
 		dir.FileSystem.getDFSConnector().Remove(dir.AbsolutePathForChild(req.Name))
+		return nil, nil, err
+	}
+
+	//update the attributes of the file now
+	err = dir.LookupAttrs(file.Attrs.Name, &file.Attrs)
+	if err != nil {
 		return nil, nil, err
 	}
 

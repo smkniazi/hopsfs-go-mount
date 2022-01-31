@@ -38,9 +38,16 @@ func (fh *FileHandle) dataChanged() bool {
 }
 
 func (fh *FileHandle) Truncate(size int64) error {
+	fh.lockHandle()
+	defer fh.unlockHandle()
+
+	// as an optimization the file is initially opened in readonly mode
+	fh.File.upgradeHandleForWriting(fh)
+
 	err := fh.File.handle.Truncate(size)
 	if err != nil {
 		logerror("Failed to truncate file", fh.logInfo(Fields{Operation: Truncate, Bytes: size, Error: err}))
+		return err
 	}
 	loginfo("Truncated file", fh.logInfo(Fields{Operation: Truncate, Bytes: size}))
 	return nil
@@ -91,7 +98,7 @@ func (fh *FileHandle) Write(ctx context.Context, req *fuse.WriteRequest, resp *f
 		logerror("Failed to write to staging file", fh.logInfo(Fields{Operation: Write, Error: err}))
 		return err
 	} else {
-		logdebug("Write data to staging file", fh.logInfo(Fields{Operation: Write, Bytes: nw}))
+		logdebug("Write data to staging file", fh.logInfo(Fields{Operation: Write, Bytes: nw, ReqOffset: req.Offset}))
 		return nil
 	}
 }

@@ -64,14 +64,13 @@ func TestFaultTolerantWriteFile(t *testing.T) {
 	hdfswriter := NewMockHdfsWriter(mockCtrl)
 
 	hdfswriter.EXPECT().Close().Return(nil).AnyTimes()
-	hdfsAccessor.EXPECT().Stat(fileName).Return(Attrs{Name: fileName}, nil).AnyTimes()
+	hdfsAccessor.EXPECT().Stat(fileName).Return(Attrs{Name: fileName, Mode: os.FileMode(0757)}, nil).AnyTimes()
 	hdfswriter.EXPECT().Close().Return(nil).AnyTimes()
 
 	hdfsAccessor.EXPECT().StatFs().Return(FsInfo{capacity: uint64(100), used: uint64(20), remaining: uint64(80)}, nil).AnyTimes()
 	hdfsAccessor.EXPECT().Remove("/testWriteFile_1").Return(nil).AnyTimes()
 	hdfsAccessor.EXPECT().CreateFile(fileName, os.FileMode(0757), gomock.Any()).DoAndReturn(func(path string,
 		mode os.FileMode, overwrite bool) (HdfsWriter, error) {
-		// fmt.Println("-.....> ")
 		return hdfswriter, nil
 	}).AnyTimes()
 

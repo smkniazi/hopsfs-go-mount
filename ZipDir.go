@@ -38,7 +38,7 @@ func NewZipRootDir(zipContainerFile *FileINode, attrs Attrs) *ZipDir {
 
 // Responds on FUSE request to get directory attributes
 func (zd *ZipDir) Attr(ctx context.Context, a *fuse.Attr) error {
-	return zd.Attrs.Attr(a)
+	return zd.Attrs.ConvertAttrToFuse(a)
 }
 
 // Reads a zip file (once) and pre-creates all the directory/file structure in memory

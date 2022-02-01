@@ -131,12 +131,14 @@ func TestLookupWithFiltering(t *testing.T) {
 
 // Testing Mkdir
 func TestMkdir(t *testing.T) {
+	dir := "/foo"
 	mockCtrl := gomock.NewController(t)
 	mockClock := &MockClock{}
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
+	hdfsAccessor.EXPECT().Chown(dir, gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"foo", "bar"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
 	root, _ := fs.Root()
-	hdfsAccessor.EXPECT().Mkdir("/foo", os.FileMode(0757)|os.ModeDir).Return(nil)
+	hdfsAccessor.EXPECT().Mkdir(dir, os.FileMode(0757)|os.ModeDir).Return(nil)
 	node, err := root.(*DirINode).Mkdir(nil, &fuse.MkdirRequest{Name: "foo", Mode: os.FileMode(0757) | os.ModeDir})
 	assert.Nil(t, err)
 	assert.Equal(t, "foo", node.(*DirINode).Attrs.Name)
@@ -144,19 +146,21 @@ func TestMkdir(t *testing.T) {
 
 // Testing Chmod and Chown
 func TestSetattr(t *testing.T) {
+	dir := "/foo"
 	mockCtrl := gomock.NewController(t)
 	mockClock := &MockClock{}
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
+	hdfsAccessor.EXPECT().Chown(dir, gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"foo", "bar"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
 	root, _ := fs.Root()
-	hdfsAccessor.EXPECT().Mkdir("/foo", os.FileMode(0757)|os.ModeDir).Return(nil)
+	hdfsAccessor.EXPECT().Mkdir(dir, os.FileMode(0757)|os.ModeDir).Return(nil)
 	node, _ := root.(*DirINode).Mkdir(nil, &fuse.MkdirRequest{Name: "foo", Mode: os.FileMode(0757) | os.ModeDir})
-	hdfsAccessor.EXPECT().Chmod("/foo", os.FileMode(0777)).Return(nil)
+	hdfsAccessor.EXPECT().Chmod(dir, os.FileMode(0777)).Return(nil).AnyTimes()
 	err := node.(*DirINode).Setattr(nil, &fuse.SetattrRequest{Mode: os.FileMode(0777), Valid: fuse.SetattrMode}, &fuse.SetattrResponse{})
 	assert.Nil(t, err)
 	assert.Equal(t, os.FileMode(0777), node.(*DirINode).Attrs.Mode)
 
-	hdfsAccessor.EXPECT().Chown("/foo", "root", "root").Return(nil)
+	hdfsAccessor.EXPECT().Chown(dir, "root", gomock.Any()).Return(nil).AnyTimes()
 	err = node.(*DirINode).Setattr(nil, &fuse.SetattrRequest{Uid: 0, Valid: fuse.SetattrUid}, &fuse.SetattrResponse{})
 	assert.Nil(t, err)
 	assert.Equal(t, uint32(0), node.(*DirINode).Attrs.Uid)

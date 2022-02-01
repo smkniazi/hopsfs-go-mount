@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
-	"os/user"
 	"path"
 	"sync"
 	"syscall"
@@ -171,67 +170,37 @@ func (file *FileINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, re
 	defer file.unlockFile()
 
 	if req.Valid.Size() {
-		var retErr error = nil
+		var err error = nil
 		for _, handle := range file.activeHandles {
 			err := handle.Truncate(int64(req.Size))
 			if err != nil {
-				retErr = err
+				err = err
 			}
 			resp.Attr.Size = req.Size
 			file.Attrs.Size = req.Size
 		}
-		return retErr
+		return err
 	}
 
-	// Get the filepath, so chmod in hdfs can work
 	path := file.AbsolutePath()
-	var err error
 
 	if req.Valid.Mode() {
-		loginfo("Setting attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode})
-		(func() {
-			err = file.FileSystem.getDFSConnector().Chmod(path, req.Mode)
-			if err != nil {
-				return
-			}
-		})()
-
-		if err != nil {
-			logerror("Failed to set attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode, Error: err})
-		} else {
-			file.Attrs.Mode = req.Mode
+		if err := ChmodOp(&file.Attrs, file.FileSystem, path, req, resp); err != nil {
+			return err
 		}
 	}
 
-	if req.Valid.Uid() {
-		u, err := user.LookupId(fmt.Sprint(req.Uid))
-		owner := fmt.Sprint(req.Uid)
-		group := fmt.Sprint(req.Gid)
-		if err != nil {
-			logerror(fmt.Sprintf("Chown: username for uid %d not found, use uid/gid instead", req.Uid),
-				Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
-		} else {
-			owner = u.Username
-			group = owner // hardcoded the group same as owner
-		}
-
-		loginfo("Setting attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group})
-		(func() {
-			err = file.FileSystem.getDFSConnector().Chown(path, fmt.Sprint(req.Uid), fmt.Sprint(req.Gid))
-			if err != nil {
-				return
-			}
-		})()
-
-		if err != nil {
-			logerror("Failed to set attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
-		} else {
-			file.Attrs.Uid = req.Uid
-			file.Attrs.Gid = req.Gid
+	if req.Valid.Uid() || req.Valid.Gid() {
+		if err := SetAttrChownOp(&file.Attrs, file.FileSystem, path, req, resp); err != nil {
+			return err
 		}
 	}
 
-	return err
+	if err := UpdateTS(&file.Attrs, file.FileSystem, path, req, resp); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (file *FileINode) countActiveHandles() int {

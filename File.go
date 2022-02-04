@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
-	"os/user"
 	"path"
 	"sync"
 	"syscall"
@@ -50,13 +49,29 @@ func (file *FileINode) Attr(ctx context.Context, a *fuse.Attr) error {
 	file.lockFile()
 	defer file.unlockFile()
 
-	if file.FileSystem.Clock.Now().After(file.Attrs.Expires) {
-		err := file.Parent.LookupAttrs(file.Attrs.Name, &file.Attrs)
+	// if the file is open for writing then update the file length and mtime
+	// from the straging file.
+	// Otherwise read the stats from the cache if it is valid.
+
+	if lrwfp, ok := file.handle.(*LocalRWFileProxy); ok {
+		fileInfo, err := lrwfp.localFile.Stat()
 		if err != nil {
+			logwarn("stat failed on staging file", Fields{Operation: Stat, Path: file.AbsolutePath(), Error: err})
 			return err
 		}
+		// update the local cache
+		file.Attrs.Size = uint64(fileInfo.Size())
+		file.Attrs.Mtime = fileInfo.ModTime()
+	} else {
+		if file.FileSystem.Clock.Now().After(file.Attrs.Expires) {
+			err := file.Parent.LookupAttrs(file.Attrs.Name, &file.Attrs)
+			if err != nil {
+				return err
+			}
+		}
 	}
-	return file.Attrs.Attr(a)
+	return file.Attrs.ConvertAttrToFuse(a)
+
 }
 
 // Responds to the FUSE file open request (creates new file handle)
@@ -111,7 +126,6 @@ func (file *FileINode) RemoveHandle(handle *FileHandle) {
 	//close the staging file if it is the last handle
 	if len(file.activeHandles) == 0 {
 		file.closeStaging()
-		logdebug("Staging file is closed.", file.logInfo(Fields{Operation: Close}))
 	} else {
 		logtrace("Staging file is not closed.", file.logInfo(Fields{Operation: Close}))
 	}
@@ -156,67 +170,37 @@ func (file *FileINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, re
 	defer file.unlockFile()
 
 	if req.Valid.Size() {
-		var retErr error
+		var err error = nil
 		for _, handle := range file.activeHandles {
-			if handle.dataChanged() { // to only write enabled handles
-				err := handle.Truncate(int64(req.Size))
-				if err != nil {
-					retErr = err
-				}
+			err := handle.Truncate(int64(req.Size))
+			if err != nil {
+				err = err
 			}
+			resp.Attr.Size = req.Size
+			file.Attrs.Size = req.Size
 		}
-		return retErr
+		return err
 	}
 
-	// Get the filepath, so chmod in hdfs can work
 	path := file.AbsolutePath()
-	var err error
 
 	if req.Valid.Mode() {
-		loginfo("Setting attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode})
-		(func() {
-			err = file.FileSystem.getDFSConnector().Chmod(path, req.Mode)
-			if err != nil {
-				return
-			}
-		})()
-
-		if err != nil {
-			logerror("Failed to set attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode, Error: err})
-		} else {
-			file.Attrs.Mode = req.Mode
+		if err := ChmodOp(&file.Attrs, file.FileSystem, path, req, resp); err != nil {
+			return err
 		}
 	}
 
-	if req.Valid.Uid() {
-		u, err := user.LookupId(fmt.Sprint(req.Uid))
-		owner := fmt.Sprint(req.Uid)
-		group := fmt.Sprint(req.Gid)
-		if err != nil {
-			logerror(fmt.Sprintf("Chown: username for uid %d not found, use uid/gid instead", req.Uid),
-				Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
-		} else {
-			owner = u.Username
-			group = owner // hardcoded the group same as owner
-		}
-
-		loginfo("Setting attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group})
-		(func() {
-			err = file.FileSystem.getDFSConnector().Chown(path, fmt.Sprint(req.Uid), fmt.Sprint(req.Gid))
-			if err != nil {
-				return
-			}
-		})()
-
-		if err != nil {
-			logerror("Failed to set attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
-		} else {
-			file.Attrs.Uid = req.Uid
-			file.Attrs.Gid = req.Gid
+	if req.Valid.Uid() || req.Valid.Gid() {
+		if err := SetAttrChownOp(&file.Attrs, file.FileSystem, path, req, resp); err != nil {
+			return err
 		}
 	}
 
-	return err
+	if err := UpdateTS(&file.Attrs, file.FileSystem, path, req, resp); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (file *FileINode) countActiveHandles() int {
@@ -326,6 +310,7 @@ func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*F
 			loginfo("Opened file, RO handle", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags}))
 		}
 	}
+
 	return fh, nil
 }
 

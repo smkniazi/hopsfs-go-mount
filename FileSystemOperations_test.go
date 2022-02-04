@@ -51,6 +51,36 @@ func TestSimple(t *testing.T) {
 	})
 }
 
+func TestTruncate(t *testing.T) {
+
+	withMount(t, "/", func(mountPoint string, hdfsAccessor HdfsAccessor) {
+		//create a file, make sure that use and group information is correct
+		testFile := filepath.Join(mountPoint, "somefile")
+		os.Remove(testFile)
+
+		loginfo(fmt.Sprintf("New file: %s", testFile), nil)
+		data1 := "123456790"
+		data2 := "abcde"
+		createFile(t, testFile, data1)
+		fi, _ := os.Stat(testFile)
+		fileSize := fi.Size()
+
+		if int(fileSize) != len(data1) {
+			t.Errorf("Invalid file size. Expecting: %d Got: %d", len(data1), fileSize)
+		}
+
+		createFile(t, testFile, data2) // truncates if file already exists
+		fi, _ = os.Stat(testFile)
+		fileSize = fi.Size()
+
+		if int(fileSize) != len(data2) {
+			t.Errorf("Invalid file size. Expecting: %d Got: %d", len(data2), fileSize)
+		}
+
+		os.Remove(testFile)
+	})
+}
+
 // testing multiple read write clients perfile
 func TestMultipleRWCllients(t *testing.T) {
 

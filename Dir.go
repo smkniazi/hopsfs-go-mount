@@ -5,8 +5,8 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/user"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -14,7 +14,6 @@ import (
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"golang.org/x/net/context"
-	"logicalclocks.com/hopsfs-mount/ugcache"
 )
 
 // Encapsulates state and operations for directory node on the HDFS file system
@@ -49,7 +48,7 @@ func (dir *DirINode) AbsolutePathForChild(name string) string {
 	if path != "/" {
 		path = path + "/"
 	}
-	return path + name
+	return path + filepath.Base(name)
 }
 
 // Responds on FUSE request to get directory attributes
@@ -63,7 +62,7 @@ func (dir *DirINode) Attr(ctx context.Context, a *fuse.Attr) error {
 		}
 
 	}
-	return dir.Attrs.Attr(a)
+	return dir.Attrs.ConvertAttrToFuse(a)
 }
 
 func (dir *DirINode) EntriesGet(name string) *fs.Node {
@@ -229,15 +228,16 @@ func (dir *DirINode) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node
 	}
 	logdebug("mkdir successful", Fields{Operation: Mkdir, Path: path.Join(dir.AbsolutePath(), req.Name)})
 
-	err = dir.changeOwnership(dir.AbsolutePathForChild(req.Name), req.Uid, req.Gid)
+	err = ChownOp(&dir.Attrs, dir.FileSystem, dir.AbsolutePathForChild(req.Name), req.Uid, req.Gid)
 	if err != nil {
-		logwarn("Unable to change ownership of new dir", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), UID: req.Uid, GID: req.Gid})
+		logwarn("Unable to change ownership of new dir", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name),
+			UID: req.Uid, GID: req.Gid, Error: err})
 		//unable to change the ownership of the directory. so delete it as the operation as a whole failed
 		dir.FileSystem.getDFSConnector().Remove(dir.AbsolutePathForChild(req.Name))
 		return nil, err
 	}
 
-	return dir.NodeFromAttrs(Attrs{Name: req.Name, Mode: req.Mode | os.ModeDir}), nil
+	return dir.NodeFromAttrs(Attrs{Name: req.Name, Mode: req.Mode | os.ModeDir, Uid: req.Uid, Gid: req.Gid}), nil
 }
 
 // Responds on FUSE Create request
@@ -253,36 +253,24 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 		//TODO remove the entry from the cache
 		return nil, nil, err
 	}
-	file.AddHandle(handle)
 
-	err = dir.changeOwnership(dir.AbsolutePathForChild(req.Name), req.Uid, req.Gid)
+	file.AddHandle(handle)
+	err = ChownOp(&dir.Attrs, dir.FileSystem, dir.AbsolutePathForChild(req.Name), req.Uid, req.Gid)
 	if err != nil {
-		logwarn("Unable to change ownership of new file", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), UID: req.Uid, GID: req.Gid})
+		logwarn("Unable to change ownership of new file", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name),
+			UID: req.Uid, GID: req.Gid, Error: err})
 		//unable to change the ownership of the file. so delete it as the operation as a whole failed
 		dir.FileSystem.getDFSConnector().Remove(dir.AbsolutePathForChild(req.Name))
 		return nil, nil, err
 	}
 
-	return file, handle, nil
-}
-
-func (dir *DirINode) changeOwnership(path string, uid uint32, gid uint32) error {
-	if hadoopUserID != uid { // the file is created by an other user, so change the ownership information
-		user := ugcache.LookupUserName(uid)
-		if user == "" {
-			logwarn("Unable to find user information", Fields{Operation: Chown, Path: path, UID: uid, GID: gid})
-		}
-		group := ugcache.LookupGroupName(gid)
-		if group == "" {
-			logwarn("Unable to find group information", Fields{Operation: Chown, Path: path, UID: uid, GID: gid})
-		}
-		err := dir.FileSystem.getDFSConnector().Chown(path, user, group)
-		if err != nil {
-			return err
-		}
-		loginfo("Updated ownership", Fields{Operation: Create, Path: path, User: user, Group: group})
+	//update the attributes of the file now
+	err = dir.LookupAttrs(file.Attrs.Name, &file.Attrs)
+	if err != nil {
+		return nil, nil, err
 	}
-	return nil
+
+	return file, handle, nil
 }
 
 // Responds on FUSE Remove request
@@ -332,58 +320,32 @@ func (dir *DirINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp
 	dir.lockMutex()
 	defer dir.unlockMutex()
 
-	// Get the filepath, so chmod in hdfs can work
+	if req.Valid.Size() {
+		return fmt.Errorf("unsupported operation. Can not set size of a directory")
+	}
+
 	path := dir.AbsolutePath()
-	var err error
 
 	if req.Valid.Mode() {
-		loginfo("Setting attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode})
-		(func() {
-			err = dir.FileSystem.getDFSConnector().Chmod(path, req.Mode)
-			if err != nil {
-				return
-			}
-		})()
-
-		if err != nil {
-			logerror("Failed to set attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode, Error: err})
-		} else {
-			dir.Attrs.Mode = req.Mode
+		if err := ChmodOp(&dir.Attrs, dir.FileSystem, path, req, resp); err != nil {
+			logwarn("Setattr (chmod) failed. ", Fields{Operation: Chmod, Path: path, Mode: req.Mode})
+			return err
 		}
 	}
 
-	if req.Valid.Uid() {
-		u, err := user.LookupId(fmt.Sprint(req.Uid))
-		owner := fmt.Sprint(req.Uid)
-		group := fmt.Sprint(req.Gid)
-		if err != nil {
-			logerror(fmt.Sprintf("Chown: username for uid %d not found, use uid/gid instead", req.Uid),
-				Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
-		} else {
-			owner = u.Username
-			group = owner // hardcoded the group same as owner until LookupGroupId available
-		}
-
-		loginfo("Setting attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group})
-		(func() {
-			err = dir.FileSystem.getDFSConnector().Chown(path, owner, group)
-			if err != nil {
-				return
-			}
-		})()
-
-		if err != nil {
-			logerror("Failed to set attributes", Fields{Operation: Chown, Path: path, User: u, UID: owner, GID: group, Error: err})
-		} else {
-			dir.Attrs.Uid = req.Uid
-			dir.Attrs.Gid = req.Gid
+	if req.Valid.Uid() || req.Valid.Gid() {
+		if err := SetAttrChownOp(&dir.Attrs, dir.FileSystem, path, req, resp); err != nil {
+			logwarn("Setattr (chown/chgrp )failed", Fields{Operation: Chmod, Path: path, UID: req.Uid, GID: req.Gid})
+			return err
 		}
 	}
 
-	return err
+	if err := UpdateTS(&dir.Attrs, dir.FileSystem, path, req, resp); err != nil {
+		return err
+	}
+
+	return nil
 }
-
-var dirLockTime time.Time = time.Time{}
 
 func (dir *DirINode) lockMutex() {
 	dir.mutex.Lock()

@@ -31,7 +31,7 @@ type FsInfo struct {
 }
 
 // Converts Attrs datastructure into FUSE represnetation
-func (attrs *Attrs) Attr(a *fuse.Attr) error {
+func (attrs *Attrs) ConvertAttrToFuse(a *fuse.Attr) error {
 	a.Inode = attrs.Inode
 	a.Mode = attrs.Mode
 	if (a.Mode & os.ModeDir) == 0 {

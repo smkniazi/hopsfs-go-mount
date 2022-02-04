@@ -23,7 +23,7 @@ var _ fs.NodeOpener = (*ZipFile)(nil)
 
 // Responds on FUSE Attr request to retrieve file attributes
 func (zipfile *ZipFile) Attr(ctx context.Context, fuseAttr *fuse.Attr) error {
-	return zipfile.Attrs.Attr(fuseAttr)
+	return zipfile.Attrs.ConvertAttrToFuse(fuseAttr)
 }
 
 // Responds on FUSE Open request for a file inside zip archive

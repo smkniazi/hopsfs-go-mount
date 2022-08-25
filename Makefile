@@ -5,14 +5,15 @@
 GITCOMMIT=`git rev-parse --short HEAD`
 BUILDTIME=`date +%FT%T%z`
 HOSTNAME=`hostname`
+VERSION = $(shell grep "VERSION" Version.go | grep -ioh "[0-9\.]*")
 
 all: hopsfs-mount 
 
 hopsfs-mount: *.go 
-	go build -tags osusergo,netgo -ldflags="-w -X main.GITCOMMIT=${GITCOMMIT} -X main.BUILDTIME=${BUILDTIME} -X main.HOSTNAME=${HOSTNAME}" -o hopsfs-mount
+	go build -tags osusergo,netgo -ldflags="-w -X main.GITCOMMIT=${GITCOMMIT} -X main.BUILDTIME=${BUILDTIME} -X main.HOSTNAME=${HOSTNAME}" -o hops-fuse-mount-${VERSION}
 
 clean:
-	rm -f hopsfs-mount \
+	rm -f hops-fuse-mount-${VERSION} \
 
 mock_%_test.go: %.go 
 	mockgen -source $< -package main  -self_package=logicalclocks.com/hopsfs-mount > $@~

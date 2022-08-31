@@ -81,6 +81,63 @@ func TestTruncate(t *testing.T) {
 	})
 }
 
+func TestTruncateGreaterLength(t *testing.T) {
+
+	withMount(t, "/", func(mountPoint string, hdfsAccessor HdfsAccessor) {
+		//create a file, make sure that use and group information is correct
+		testFile1 := filepath.Join(mountPoint, "somefile1")
+		os.Remove(testFile1)
+		truncateLen := int64(1024 * 1024)
+
+		file, err := os.Create(testFile1)
+		if err != nil {
+			t.Fatalf("Unable to create a new file")
+		}
+
+		stat, err := file.Stat()
+		if err != nil {
+			t.Fatalf("Unable to stat test file")
+		}
+
+		if stat.Size() != 0 {
+			t.Fatalf("Wrong file size. Expecting: 0. Got: %d ", stat.Size())
+		}
+
+		err = file.Truncate(truncateLen)
+		if err != nil {
+			t.Fatalf("Truncate failed")
+		}
+
+		err = file.Close()
+		if err != nil {
+			t.Fatalf("Close failed")
+		}
+
+		fileReader, err := os.Open(testFile1)
+		if err != nil {
+			t.Fatalf("File open failed")
+		}
+
+		buffer := make([]byte, truncateLen)
+		lenRead, err := fileReader.Read(buffer)
+		if err != nil {
+			t.Fatalf("File read failed")
+		}
+
+		if lenRead != int(truncateLen) {
+			t.Fatalf("Expecting %d bytes to read. Got: %d", truncateLen, lenRead)
+		}
+
+		err = fileReader.Close()
+		if err != nil {
+			t.Fatalf("File close failed")
+		}
+
+		os.Remove(testFile1)
+		logdebug("Done", nil)
+	})
+}
+
 // testing multiple read write clients perfile
 func TestMultipleRWCllients(t *testing.T) {
 
@@ -199,6 +256,7 @@ func TestGitClone(t *testing.T) {
 
 func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor HdfsAccessor)) {
 	t.Helper()
+	initLogger("fatal", false, "")
 	hdfsAccessor, _ := NewHdfsAccessor("localhost:8020", WallClock{}, TLSConfig{TLS: false})
 	err := hdfsAccessor.EnsureConnected()
 	if err != nil {

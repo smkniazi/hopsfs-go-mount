@@ -18,4 +18,5 @@ require (
 replace github.com/colinmarc/hdfs/v2 v2.2.0 => github.com/logicalclocks/hopsfs-go-client/v2 v2.4.7
 
 //replace github.com/colinmarc/hdfs/v2 v2.2.0 => /home/salman/code/hops/hopsfs-go/hopsfs-go-client
+
 //replace bazil.org/fuse v0.0.0-20200524192727-fb710f7dfd05 => /home/salman/code/hops/hopsfs-go/fuse

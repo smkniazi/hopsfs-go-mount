@@ -1,6 +1,9 @@
 package main
 
-import "os"
+import (
+	"math"
+	"os"
+)
 
 type LocalRWFileProxy struct {
 	localFile *os.File // handle to the temp file in staging dir
@@ -9,10 +12,26 @@ type LocalRWFileProxy struct {
 
 var _ FileProxy = (*LocalRWFileProxy)(nil)
 
-func (p *LocalRWFileProxy) Truncate(size int64) error {
+func (p *LocalRWFileProxy) Truncate(size int64) (int64, error) {
 	p.file.lockFileHandles()
 	defer p.file.unlockFileHandles()
-	return p.localFile.Truncate(size)
+
+	statBefore, err := p.localFile.Stat()
+	if err != nil {
+		return 0, err
+	}
+
+	err = p.localFile.Truncate(size)
+	if err != nil {
+		return 0, err
+	}
+
+	statAfter, err := p.localFile.Stat()
+	if err != nil {
+		return 0, err
+	}
+
+	return int64(math.Abs(float64(statAfter.Size()) - float64(statBefore.Size()))), nil
 }
 
 func (p *LocalRWFileProxy) WriteAt(b []byte, off int64) (n int, err error) {

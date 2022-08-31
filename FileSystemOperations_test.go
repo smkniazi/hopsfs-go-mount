@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"os/exec"
 	"os/user"
@@ -11,9 +12,37 @@ import (
 	"strconv"
 	"syscall"
 	"testing"
+	"time"
 
 	"bazil.org/fuse/fs/fstestutil"
 )
+
+func TestReadWriteEmptyFile(t *testing.T) {
+
+	withMount(t, "/", func(mountPoint string, hdfsAccessor HdfsAccessor) {
+		//create a file, make sure that use and group information is correct
+		r := rand.New(rand.NewSource(time.Now().Local().Unix()))
+		for i := 0; i < 10; i++ {
+			testFile := filepath.Join(mountPoint, fmt.Sprintf("somefile_%d", r.Int()))
+			os.Remove(testFile)
+
+			loginfo("-----> Creating file", nil)
+			file, err := os.Create(testFile)
+			if err != nil {
+				t.Fatalf("Unable to create a new file")
+			}
+
+			file.WriteString("test")
+			loginfo("-----> Calling close", nil)
+			err = file.Close()
+			if err != nil {
+				t.Fatalf("Close failed")
+			}
+			os.Remove(testFile)
+		}
+		logdebug("Done", nil)
+	})
+}
 
 func TestSimple(t *testing.T) {
 
@@ -78,6 +107,63 @@ func TestTruncate(t *testing.T) {
 		}
 
 		os.Remove(testFile)
+	})
+}
+
+func TestTruncateGreaterLength(t *testing.T) {
+
+	withMount(t, "/", func(mountPoint string, hdfsAccessor HdfsAccessor) {
+		//create a file, make sure that use and group information is correct
+		testFile1 := filepath.Join(mountPoint, "somefile1")
+		os.Remove(testFile1)
+		truncateLen := int64(1024 * 1024)
+
+		file, err := os.Create(testFile1)
+		if err != nil {
+			t.Fatalf("Unable to create a new file")
+		}
+
+		stat, err := file.Stat()
+		if err != nil {
+			t.Fatalf("Unable to stat test file")
+		}
+
+		if stat.Size() != 0 {
+			t.Fatalf("Wrong file size. Expecting: 0. Got: %d ", stat.Size())
+		}
+
+		err = file.Truncate(truncateLen)
+		if err != nil {
+			t.Fatalf("Truncate failed")
+		}
+
+		err = file.Close()
+		if err != nil {
+			t.Fatalf("Close failed")
+		}
+
+		fileReader, err := os.Open(testFile1)
+		if err != nil {
+			t.Fatalf("File open failed")
+		}
+
+		buffer := make([]byte, truncateLen)
+		lenRead, err := fileReader.Read(buffer)
+		if err != nil {
+			t.Fatalf("File read failed")
+		}
+
+		if lenRead != int(truncateLen) {
+			t.Fatalf("Expecting %d bytes to read. Got: %d", truncateLen, lenRead)
+		}
+
+		err = fileReader.Close()
+		if err != nil {
+			t.Fatalf("File close failed")
+		}
+
+		os.Remove(testFile1)
+		logdebug("Done", nil)
 	})
 }
 
@@ -199,6 +285,7 @@ func TestGitClone(t *testing.T) {
 
 func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor HdfsAccessor)) {
 	t.Helper()
+	//initLogger("debug", false, "")
 	hdfsAccessor, _ := NewHdfsAccessor("localhost:8020", WallClock{}, TLSConfig{TLS: false})
 	err := hdfsAccessor.EnsureConnected()
 	if err != nil {

@@ -31,8 +31,8 @@ var groupIdToNameCache = make(map[uint32]ugName) // cache for converting usernam
 var ugMutex sync.Mutex
 
 func LookupUId(userName string) uint32 {
-	ugMutex.Lock()
-	defer ugMutex.Unlock()
+	lockUGCache()
+	defer unlockUGCache()
 
 	if userName == "" {
 		return 0
@@ -64,8 +64,8 @@ func LookupUId(userName string) uint32 {
 }
 
 func LookupGid(groupName string) uint32 {
-	ugMutex.Lock()
-	defer ugMutex.Unlock()
+	lockUGCache()
+	defer unlockUGCache()
 
 	if groupName == "" {
 		return 0
@@ -97,8 +97,8 @@ func LookupGid(groupName string) uint32 {
 }
 
 func LookupUserName(uid uint32) string {
-	ugMutex.Lock()
-	defer ugMutex.Unlock()
+	lockUGCache()
+	defer unlockUGCache()
 
 	cacheEntry, ok := userIdToNameCache[uid]
 	if ok && time.Now().Before(cacheEntry.expires) {
@@ -116,8 +116,8 @@ func LookupUserName(uid uint32) string {
 }
 
 func LookupGroupName(gid uint32) string {
-	ugMutex.Lock()
-	defer ugMutex.Unlock()
+	lockUGCache()
+	defer unlockUGCache()
 
 	cacheEntry, ok := groupIdToNameCache[gid]
 	if ok && time.Now().Before(cacheEntry.expires) {
@@ -140,4 +140,12 @@ func CurrentUserName() (string, error) {
 		return "", fmt.Errorf("couldn't determine user: %s", err)
 	}
 	return u.Username, nil
+}
+
+func lockUGCache() {
+	ugMutex.Lock()
+}
+
+func unlockUGCache() {
+	ugMutex.Unlock()
 }

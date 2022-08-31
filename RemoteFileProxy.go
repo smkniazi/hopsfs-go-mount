@@ -12,11 +12,11 @@ type RemoteROFileProxy struct {
 
 var _ FileProxy = (*RemoteROFileProxy)(nil)
 
-func (p *RemoteROFileProxy) Truncate(size int64) error {
+func (p *RemoteROFileProxy) Truncate(size int64) (int64, error) {
 	p.file.lockFileHandles()
 	defer p.file.unlockFileHandles()
 	logfatal("Truncate API is not supported. Read only mode", nil)
-	return nil
+	return 0, nil
 }
 
 func (p *RemoteROFileProxy) WriteAt(b []byte, off int64) (n int, err error) {

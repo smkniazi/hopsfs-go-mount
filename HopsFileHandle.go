@@ -11,7 +11,7 @@ import (
 	"golang.org/x/net/context"
 )
 
-// Represends a handle to an open file
+// Represents a handle to an open file
 type FileHandle struct {
 	File              *FileINode
 	mutex             sync.Mutex     // all operations on the handle are serialized to simplify invariants
@@ -44,11 +44,14 @@ func (fh *FileHandle) Truncate(size int64) error {
 	// as an optimization the file is initially opened in readonly mode
 	fh.File.upgradeHandleForWriting(fh)
 
-	err := fh.File.handle.Truncate(size)
+	sizeChanged, err := fh.File.fileProxy.Truncate(size)
 	if err != nil {
 		logerror("Failed to truncate file", fh.logInfo(Fields{Operation: Truncate, Bytes: size, Error: err}))
 		return err
 	}
+
+	fh.totalBytesWritten += sizeChanged
+
 	loginfo("Truncated file", fh.logInfo(Fields{Operation: Truncate, Bytes: size}))
 	return nil
 }
@@ -66,7 +69,7 @@ func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fus
 	defer fh.unlockHandle()
 
 	buf := resp.Data[0:req.Size]
-	nr, err := fh.File.handle.ReadAt(buf, req.Offset)
+	nr, err := fh.File.fileProxy.ReadAt(buf, req.Offset)
 	resp.Data = buf[0:nr]
 	fh.tatalBytesRead += int64(nr)
 
@@ -91,7 +94,7 @@ func (fh *FileHandle) Write(ctx context.Context, req *fuse.WriteRequest, resp *f
 	// as an optimization the file is initially opened in readonly mode
 	fh.File.upgradeHandleForWriting(fh)
 
-	nw, err := fh.File.handle.WriteAt(req.Data, req.Offset)
+	nw, err := fh.File.fileProxy.WriteAt(req.Data, req.Offset)
 	resp.Size = nw
 	fh.totalBytesWritten += int64(nw)
 	if err != nil {
@@ -142,7 +145,7 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 	}
 
 	//open the file for reading and upload to DFS
-	err = fh.File.handle.SeekToStart()
+	err = fh.File.fileProxy.SeekToStart()
 	if err != nil {
 		logerror("Unable to seek to the begenning of the temp file", fh.logInfo(Fields{Operation: operation, Error: err}))
 		return err
@@ -151,7 +154,7 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 	b := make([]byte, 65536)
 	written := 0
 	for {
-		nr, err := fh.File.handle.Read(b)
+		nr, err := fh.File.fileProxy.Read(b)
 		if err != nil {
 			if err != io.EOF {
 				logerror("Failed to read from staging file", fh.logInfo(Fields{Operation: operation, Error: err}))

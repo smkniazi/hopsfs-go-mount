@@ -150,8 +150,9 @@ func (dfs *hdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 // Opens HDFS file for reading
 func (dfs *hdfsAccessorImpl) OpenRead(path string) (ReadSeekCloser, error) {
 	// Blocking read. This is to reduce the connections pressue on hadoop-name-node
-	dfs.MetadataClientMutex.Lock()
-	defer dfs.MetadataClientMutex.Unlock()
+	dfs.lockHadoopClient()
+	defer dfs.unlockHadoopClient()
+
 	if dfs.MetadataClient == nil {
 		if err := dfs.ConnectMetadataClient(); err != nil {
 			return nil, err
@@ -166,8 +167,9 @@ func (dfs *hdfsAccessorImpl) OpenRead(path string) (ReadSeekCloser, error) {
 
 // Creates new HDFS file
 func (dfs *hdfsAccessorImpl) CreateFile(path string, mode os.FileMode, overwrite bool) (HdfsWriter, error) {
-	dfs.MetadataClientMutex.Lock()
-	defer dfs.MetadataClientMutex.Unlock()
+	dfs.lockHadoopClient()
+	defer dfs.unlockHadoopClient()
+
 	if dfs.MetadataClient == nil {
 		if err := dfs.ConnectMetadataClient(); err != nil {
 			return nil, err
@@ -183,8 +185,9 @@ func (dfs *hdfsAccessorImpl) CreateFile(path string, mode os.FileMode, overwrite
 
 // Enumerates HDFS directory
 func (dfs *hdfsAccessorImpl) ReadDir(path string) ([]Attrs, error) {
-	dfs.MetadataClientMutex.Lock()
-	defer dfs.MetadataClientMutex.Unlock()
+	dfs.lockHadoopClient()
+	defer dfs.unlockHadoopClient()
+
 	if dfs.MetadataClient == nil {
 		if err := dfs.ConnectMetadataClient(); err != nil {
 			return nil, err
@@ -210,8 +213,8 @@ func (dfs *hdfsAccessorImpl) ReadDir(path string) ([]Attrs, error) {
 
 // Retrieves file/directory attributes
 func (dfs *hdfsAccessorImpl) Stat(path string) (Attrs, error) {
-	dfs.MetadataClientMutex.Lock()
-	defer dfs.MetadataClientMutex.Unlock()
+	dfs.lockHadoopClient()
+	defer dfs.unlockHadoopClient()
 
 	if dfs.MetadataClient == nil {
 		if err := dfs.ConnectMetadataClient(); err != nil {
@@ -235,8 +238,8 @@ func (dfs *hdfsAccessorImpl) Stat(path string) (Attrs, error) {
 
 // Retrieves HDFS usages
 func (dfs *hdfsAccessorImpl) StatFs() (FsInfo, error) {
-	dfs.MetadataClientMutex.Lock()
-	defer dfs.MetadataClientMutex.Unlock()
+	dfs.lockHadoopClient()
+	defer dfs.unlockHadoopClient()
 
 	if dfs.MetadataClient == nil {
 		if err := dfs.ConnectMetadataClient(); err != nil {
@@ -351,8 +354,9 @@ func isNonRetriableError(err error) bool {
 
 // Creates a directory
 func (dfs *hdfsAccessorImpl) Mkdir(path string, mode os.FileMode) error {
-	dfs.MetadataClientMutex.Lock()
-	defer dfs.MetadataClientMutex.Unlock()
+	dfs.lockHadoopClient()
+	defer dfs.unlockHadoopClient()
+
 	if dfs.MetadataClient == nil {
 		if err := dfs.ConnectMetadataClient(); err != nil {
 			return err
@@ -369,8 +373,9 @@ func (dfs *hdfsAccessorImpl) Mkdir(path string, mode os.FileMode) error {
 
 // Removes file or directory
 func (dfs *hdfsAccessorImpl) Remove(path string) error {
-	dfs.MetadataClientMutex.Lock()
-	defer dfs.MetadataClientMutex.Unlock()
+	dfs.lockHadoopClient()
+	defer dfs.unlockHadoopClient()
+
 	if dfs.MetadataClient == nil {
 		if err := dfs.ConnectMetadataClient(); err != nil {
 			return err
@@ -381,8 +386,9 @@ func (dfs *hdfsAccessorImpl) Remove(path string) error {
 
 // Renames file or directory
 func (dfs *hdfsAccessorImpl) Rename(oldPath string, newPath string) error {
-	dfs.MetadataClientMutex.Lock()
-	defer dfs.MetadataClientMutex.Unlock()
+	dfs.lockHadoopClient()
+	defer dfs.unlockHadoopClient()
+
 	if dfs.MetadataClient == nil {
 		if err := dfs.ConnectMetadataClient(); err != nil {
 			return err
@@ -393,8 +399,9 @@ func (dfs *hdfsAccessorImpl) Rename(oldPath string, newPath string) error {
 
 // Changes the mode of the file
 func (dfs *hdfsAccessorImpl) Chmod(path string, mode os.FileMode) error {
-	dfs.MetadataClientMutex.Lock()
-	defer dfs.MetadataClientMutex.Unlock()
+	dfs.lockHadoopClient()
+	defer dfs.unlockHadoopClient()
+
 	if dfs.MetadataClient == nil {
 		if err := dfs.ConnectMetadataClient(); err != nil {
 			return err
@@ -405,8 +412,9 @@ func (dfs *hdfsAccessorImpl) Chmod(path string, mode os.FileMode) error {
 
 // Changes the owner and group of the file
 func (dfs *hdfsAccessorImpl) Chown(path string, user, group string) error {
-	dfs.MetadataClientMutex.Lock()
-	defer dfs.MetadataClientMutex.Unlock()
+	dfs.lockHadoopClient()
+	defer dfs.unlockHadoopClient()
+
 	if dfs.MetadataClient == nil {
 		if err := dfs.ConnectMetadataClient(); err != nil {
 			return err
@@ -417,8 +425,8 @@ func (dfs *hdfsAccessorImpl) Chown(path string, user, group string) error {
 
 // Close current connection if needed
 func (dfs *hdfsAccessorImpl) Close() error {
-	dfs.MetadataClientMutex.Lock()
-	defer dfs.MetadataClientMutex.Unlock()
+	dfs.lockHadoopClient()
+	defer dfs.unlockHadoopClient()
 
 	if dfs.MetadataClient != nil {
 		err := dfs.MetadataClient.Close()
@@ -426,4 +434,12 @@ func (dfs *hdfsAccessorImpl) Close() error {
 		return err
 	}
 	return nil
+}
+
+func (dfs *hdfsAccessorImpl) lockHadoopClient() {
+	dfs.MetadataClientMutex.Lock()
+}
+
+func (dfs *hdfsAccessorImpl) unlockHadoopClient() {
+	dfs.MetadataClientMutex.Unlock()
 }

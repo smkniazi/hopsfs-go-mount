@@ -92,8 +92,8 @@ func TestFaultTolerantWriteFile(t *testing.T) {
 	assert.Equal(t, writeHandle.totalBytesWritten, int64(11))
 
 	binaryData := make([]byte, 65536)
-	writeHandle.File.handle.SeekToStart()
-	nr, _ := writeHandle.File.handle.Read(binaryData)
+	writeHandle.File.fileProxy.SeekToStart()
+	nr, _ := writeHandle.File.fileProxy.Read(binaryData)
 	binaryData = binaryData[:nr]
 
 	// Mock the EOF error to test the fault tolerant write/flush

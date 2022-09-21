@@ -24,7 +24,6 @@ type FileSystem struct {
 	hdfsAccessorsIndex int
 	SrcDir             string       // Src directory that will mounted
 	AllowedPrefixes    []string     // List of allowed path prefixes (only those prefixes are exposed via mountpoint)
-	ExpandZips         bool         // Indicates whether ZIP expansion feature is enabled
 	ReadOnly           bool         // Indicates whether mount filesystem with readonly
 	Mounted            bool         // True if filesystem is mounted
 	RetryPolicy        *RetryPolicy // Retry policy
@@ -40,12 +39,11 @@ var _ fs.FS = (*FileSystem)(nil)
 var _ fs.FSStatfser = (*FileSystem)(nil)
 
 // Creates an instance of mountable file system
-func NewFileSystem(hdfsAccessors []HdfsAccessor, srcDir string, allowedPrefixes []string, expandZips bool, readOnly bool, retryPolicy *RetryPolicy, clock Clock) (*FileSystem, error) {
+func NewFileSystem(hdfsAccessors []HdfsAccessor, srcDir string, allowedPrefixes []string, readOnly bool, retryPolicy *RetryPolicy, clock Clock) (*FileSystem, error) {
 	return &FileSystem{
 		HdfsAccessors:   hdfsAccessors,
 		Mounted:         false,
 		AllowedPrefixes: allowedPrefixes,
-		ExpandZips:      expandZips,
 		ReadOnly:        readOnly,
 		RetryPolicy:     retryPolicy,
 		Clock:           clock,

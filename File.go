@@ -26,7 +26,7 @@ type FileINode struct {
 
 	activeHandles   []*FileHandle // list of opened file handles
 	fileMutex       sync.Mutex    // mutex for file operation such as open, delete
-	handle          FileProxy     // handle to the temp file in staging dir
+	fileProxy       FileProxy     // file proxy. Could be LocalRWFileProxy or RemoteFileProxy
 	fileHandleMutex sync.Mutex    // mutex for file handle
 }
 
@@ -53,7 +53,7 @@ func (file *FileINode) Attr(ctx context.Context, a *fuse.Attr) error {
 	// from the straging file.
 	// Otherwise read the stats from the cache if it is valid.
 
-	if lrwfp, ok := file.handle.(*LocalRWFileProxy); ok {
+	if lrwfp, ok := file.fileProxy.(*LocalRWFileProxy); ok {
 		fileInfo, err := lrwfp.localFile.Stat()
 		if err != nil {
 			logwarn("stat failed on staging file", Fields{Operation: Stat, Path: file.AbsolutePath(), Error: err})
@@ -133,12 +133,12 @@ func (file *FileINode) RemoveHandle(handle *FileHandle) {
 
 // close staging file
 func (file *FileINode) closeStaging() {
-	if file.handle != nil { // if not already closed
-		err := file.handle.Close()
+	if file.fileProxy != nil { // if not already closed
+		err := file.fileProxy.Close()
 		if err != nil {
 			logerror("Failed to close staging file", file.logInfo(Fields{Operation: Close, Error: err}))
 		}
-		file.handle = nil
+		file.fileProxy = nil
 		loginfo("Staging file is closed", file.logInfo(Fields{Operation: Close}))
 	}
 }
@@ -210,7 +210,7 @@ func (file *FileINode) countActiveHandles() int {
 }
 
 func (file *FileINode) createStagingFile(operation string, existsInDFS bool) (*os.File, error) {
-	if file.handle != nil {
+	if file.fileProxy != nil {
 		return nil, nil // there is already an active handle.
 	}
 
@@ -284,7 +284,7 @@ func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*F
 
 	if operation == Create {
 		// there must be no existing file handles for create operation
-		if file.handle != nil {
+		if file.fileProxy != nil {
 			logpanic("Unexpected file state during creation", file.logInfo(Fields{Flags: flags}))
 		}
 		if err := file.checkDiskSpace(); err != nil {
@@ -294,11 +294,11 @@ func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*F
 		if err != nil {
 			return nil, err
 		}
-		fh.File.handle = &LocalRWFileProxy{localFile: stagingFile, file: file}
+		fh.File.fileProxy = &LocalRWFileProxy{localFile: stagingFile, file: file}
 		loginfo("Opened file, RW handle", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags}))
 	} else {
-		if file.handle != nil {
-			fh.File.handle = file.handle
+		if file.fileProxy != nil {
+			fh.File.fileProxy = file.fileProxy
 			loginfo("Opened file, Returning existing handle", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags}))
 		} else {
 			// we alway open the file in RO mode. when the client writes to the file
@@ -306,7 +306,7 @@ func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*F
 			// in RW state then we use the existing RW handle
 			// if file.handle
 			reader, _ := file.FileSystem.getDFSConnector().OpenRead(file.AbsolutePath())
-			fh.File.handle = &RemoteROFileProxy{hdfsReader: reader, file: file}
+			fh.File.fileProxy = &RemoteROFileProxy{hdfsReader: reader, file: file}
 			loginfo("Opened file, RO handle", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags}))
 		}
 	}
@@ -320,9 +320,9 @@ func (file *FileINode) upgradeHandleForWriting(me *FileHandle) error {
 	defer file.unlockFileHandles()
 
 	var upgrade = false
-	if _, ok := file.handle.(*LocalRWFileProxy); ok {
+	if _, ok := file.fileProxy.(*LocalRWFileProxy); ok {
 		upgrade = false
-	} else if _, ok := file.handle.(*RemoteROFileProxy); ok {
+	} else if _, ok := file.fileProxy.(*RemoteROFileProxy); ok {
 		upgrade = true
 	} else {
 		logpanic("Unrecognized remote file proxy", nil)
@@ -340,9 +340,9 @@ func (file *FileINode) upgradeHandleForWriting(me *FileHandle) error {
 			}
 		}
 
-		remoteROFileProxy, _ := file.handle.(*RemoteROFileProxy)
+		remoteROFileProxy, _ := file.fileProxy.(*RemoteROFileProxy)
 		remoteROFileProxy.hdfsReader.Close() // close this read only handle
-		file.handle = nil
+		file.fileProxy = nil
 
 		if err := file.checkDiskSpace(); err != nil {
 			return err
@@ -353,7 +353,7 @@ func (file *FileINode) upgradeHandleForWriting(me *FileHandle) error {
 			return err
 		}
 
-		file.handle = &LocalRWFileProxy{localFile: stagingFile, file: file}
+		file.fileProxy = &LocalRWFileProxy{localFile: stagingFile, file: file}
 		loginfo("Open handle upgrade to support RW ", file.logInfo(Fields{Operation: "Open"}))
 		return nil
 	}

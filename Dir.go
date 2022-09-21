@@ -7,7 +7,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -114,24 +113,6 @@ func (dir *DirINode) Lookup(ctx context.Context, name string) (fs.Node, error) {
 		return *node, nil
 	}
 
-	if dir.FileSystem.ExpandZips && strings.HasSuffix(name, ".zip@") {
-		// looking up original zip file
-		zipFileName := name[:len(name)-1]
-		zipFileNode, err := dir.Lookup(nil, zipFileName)
-		if err != nil {
-			return nil, err
-		}
-		zipFile, ok := zipFileNode.(*FileINode)
-		if !ok {
-			return nil, fuse.ENOENT
-		}
-		attrs := zipFile.Attrs
-		attrs.Mode |= os.ModeDir | 0111 // TODO: set x only if r is set
-		attrs.Name = name
-		attrs.Inode = 0 // let underlying FUSE layer to assign inodes automatically
-		return NewZipRootDir(zipFile, attrs), nil
-	}
-
 	var attrs Attrs
 	err := dir.LookupAttrs(name, &attrs)
 	if err != nil {
@@ -166,16 +147,6 @@ func (dir *DirINode) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 			// since it's highly likely that we will have Lookup() call for this name
 			// This is the key trick which dramatically speeds up 'ls'
 			dir.NodeFromAttrs(a)
-
-			if dir.FileSystem.ExpandZips {
-				// Creating a virtual directory next to each zip file
-				// (appending '@' to the zip file name)
-				if !a.Mode.IsDir() && strings.HasSuffix(a.Name, ".zip") {
-					entries = append(entries, fuse.Dirent{
-						Name: a.Name + "@",
-						Type: fuse.DT_Dir})
-				}
-			}
 		}
 	}
 	return entries, nil

@@ -271,7 +271,7 @@ func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor
 	ftHdfsAccessor := NewFaultTolerantHdfsAccessor(hdfsAccessor, retryPolicy)
 
 	// Creating the virtual file system
-	fileSystem, err := NewFileSystem([]HdfsAccessor{ftHdfsAccessor}, srcDir, []string{"*"}, false, false, retryPolicy, WallClock{})
+	fileSystem, err := NewFileSystem([]HdfsAccessor{ftHdfsAccessor}, srcDir, []string{"*"}, false, retryPolicy, WallClock{})
 	if err != nil {
 		t.Fatalf(fmt.Sprintf("Error/NewFileSystem: %v ", err), nil)
 	}

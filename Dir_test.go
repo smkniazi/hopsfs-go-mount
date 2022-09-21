@@ -17,7 +17,7 @@ func TestAttributeCaching(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockClock := &MockClock{}
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
-	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
+	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"*"}, false, NewDefaultRetryPolicy(mockClock), mockClock)
 	root, _ := fs.Root()
 	hdfsAccessor.EXPECT().Stat("/testDir").Return(Attrs{Name: "testDir", Mode: os.ModeDir | 0757}, nil)
 	dir, err := root.(*DirINode).Lookup(nil, "testDir")
@@ -56,7 +56,7 @@ func TestReadDirWithFiltering(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockClock := &MockClock{}
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
-	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"foo", "bar"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
+	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"foo", "bar"}, false, NewDefaultRetryPolicy(mockClock), mockClock)
 	root, _ := fs.Root()
 	hdfsAccessor.EXPECT().ReadDir("/").Return([]Attrs{
 		{Name: "quz", Mode: os.ModeDir},
@@ -77,7 +77,7 @@ func TestReadDirWithZipExpansionDisabled(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockClock := &MockClock{}
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
-	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"*"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
+	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"*"}, false, NewDefaultRetryPolicy(mockClock), mockClock)
 	root, _ := fs.Root()
 	hdfsAccessor.EXPECT().ReadDir("/").Return([]Attrs{
 		{Name: "foo.zipx"},
@@ -92,35 +92,12 @@ func TestReadDirWithZipExpansionDisabled(t *testing.T) {
 	assert.Equal(t, "bar.zip", dirents[2].Name)
 }
 
-// Testing processing of .zip files if '-expandZips' is activated
-func TestReadDirWithZipExpansionEnabled(t *testing.T) {
-	mockCtrl := gomock.NewController(t)
-	mockClock := &MockClock{}
-	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
-	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"*"}, true, false, NewDefaultRetryPolicy(mockClock), mockClock)
-	root, _ := fs.Root()
-	hdfsAccessor.EXPECT().ReadDir("/").Return([]Attrs{
-		{Name: "foo.zipx"},
-		{Name: "dir.zip", Mode: os.ModeDir},
-		{Name: "bar.zip"},
-	}, nil)
-	dirents, err := root.(*DirINode).ReadDirAll(nil)
-	assert.Nil(t, err)
-	assert.Equal(t, 4, len(dirents))
-	assert.Equal(t, "foo.zipx", dirents[0].Name)
-	assert.Equal(t, "dir.zip", dirents[1].Name)
-	assert.Equal(t, "bar.zip", dirents[2].Name)
-	assert.Equal(t, fuse.DT_File, dirents[2].Type)
-	assert.Equal(t, "bar.zip@", dirents[3].Name)
-	assert.Equal(t, fuse.DT_Dir, dirents[3].Type)
-}
-
 // Testing whether '-allowedPrefixes' path filtering works for Lookup
 func TestLookupWithFiltering(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockClock := &MockClock{}
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
-	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"foo", "bar"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
+	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"foo", "bar"}, false, NewDefaultRetryPolicy(mockClock), mockClock)
 	root, _ := fs.Root()
 	hdfsAccessor.EXPECT().Stat("/foo").Return(Attrs{Name: "foo", Mode: os.ModeDir}, nil)
 	_, err := root.(*DirINode).Lookup(nil, "foo")
@@ -136,7 +113,7 @@ func TestMkdir(t *testing.T) {
 	mockClock := &MockClock{}
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
 	hdfsAccessor.EXPECT().Chown(dir, gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"foo", "bar"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
+	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"foo", "bar"}, false, NewDefaultRetryPolicy(mockClock), mockClock)
 	root, _ := fs.Root()
 	hdfsAccessor.EXPECT().Mkdir(dir, os.FileMode(0757)|os.ModeDir).Return(nil)
 	node, err := root.(*DirINode).Mkdir(nil, &fuse.MkdirRequest{Name: "foo", Mode: os.FileMode(0757) | os.ModeDir})
@@ -151,7 +128,7 @@ func TestSetattr(t *testing.T) {
 	mockClock := &MockClock{}
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
 	hdfsAccessor.EXPECT().Chown(dir, gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"foo", "bar"}, false, false, NewDefaultRetryPolicy(mockClock), mockClock)
+	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"foo", "bar"}, false, NewDefaultRetryPolicy(mockClock), mockClock)
 	root, _ := fs.Root()
 	hdfsAccessor.EXPECT().Mkdir(dir, os.FileMode(0757)|os.ModeDir).Return(nil)
 	node, _ := root.(*DirINode).Mkdir(nil, &fuse.MkdirRequest{Name: "foo", Mode: os.FileMode(0757) | os.ModeDir})

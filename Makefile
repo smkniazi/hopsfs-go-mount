@@ -1,4 +1,5 @@
 # Copyright (c) Microsoft. All rights reserved.
+# Copyright (c) Hopsworks AB. All rights reserved.
 # Licensed under the MIT license. See LICENSE file in the project root for details.
 
 
@@ -10,10 +11,10 @@ VERSION = $(shell grep "VERSION" Version.go | grep -ioh "[0-9\.]*")
 all: hopsfs-mount 
 
 hopsfs-mount: *.go 
-	go build -tags osusergo,netgo -ldflags="-w -X main.GITCOMMIT=${GITCOMMIT} -X main.BUILDTIME=${BUILDTIME} -X main.HOSTNAME=${HOSTNAME}" -o hops-fuse-mount-${VERSION}
+	go build -tags osusergo,netgo -ldflags="-w -X main.GITCOMMIT=${GITCOMMIT} -X main.BUILDTIME=${BUILDTIME} -X main.HOSTNAME=${HOSTNAME}" -o bin/hops-fuse-mount-${VERSION}
 
 clean:
-	rm -f hops-fuse-mount-${VERSION} \
+	rm -f bin/* \
 
 mock_%_test.go: %.go 
 	mockgen -source $< -package main  -self_package=logicalclocks.com/hopsfs-mount > $@~

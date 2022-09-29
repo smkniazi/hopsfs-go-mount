@@ -28,9 +28,9 @@ VERSION=`grep VERSION Version.go | grep VERSION Version.go | sed 's/[\t A-Z"=]//
 
 rm -rf bin/*
 
-DOCKER_IMAGE="hopsfs_mount_${VERSION}"
+DOCKER_IMAGE="hopsfs_mount:${VERSION}"
 if [ "$PREFIX" != "" ]; then
-  DOCKER_IMAGE="${PREFIX}"
+  DOCKER_IMAGE="${PREFIX}:${VERSION}"
 fi
 
 echo "Creating docker image ${DOCKER_IMAGE}"

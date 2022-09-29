@@ -1,3 +1,6 @@
+# Copyright (c) Hopsworks AB. All rights reserved.
+# Licensed under the MIT license. See LICENSE file in the project root for details.
+
 FROM centos:centos7
 
 ARG userid=1000

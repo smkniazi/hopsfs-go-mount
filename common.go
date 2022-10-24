@@ -4,12 +4,17 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"regexp"
 	"time"
 
 	"bazil.org/fuse"
 	"logicalclocks.com/hopsfs-mount/ugcache"
 )
+
+var r = regexp.MustCompile(`/*Projects/(?P<projectName>\w+)/(?P<datasetName>\w+)/*`)
 
 func ChmodOp(attrs *Attrs, fileSystem *FileSystem, path string, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
 	loginfo("Setting attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode})
@@ -47,13 +52,21 @@ func ChownOp(attrs *Attrs, fileSystem *FileSystem, path string, uid uint32, gid 
 		return fmt.Errorf(fmt.Sprintf("Setattr failed. Unable to find user information. Path %s", path))
 	}
 
-	groupName = ugcache.LookupGroupName(gid)
-	if groupName == "" {
-		return fmt.Errorf(fmt.Sprintf("Setattr failed. Unable to find group information. Path %s", path))
+	if os.Getenv("HADOOP_USER_NAME") != "" {
+		userName = os.Getenv("HADOOP_USER_NAME")
+	}
+
+	groupName, err := getGroupNameFromPath(path)
+	if err != nil {
+		logwarn(err.Error(), Fields{Path: path})
+		groupName = ugcache.LookupGroupName(gid)
+		if groupName == "" {
+			return fmt.Errorf(fmt.Sprintf("Setattr failed. Unable to find group information. Path %s", path))
+		}
 	}
 
 	loginfo("Setting attributes", Fields{Operation: Chown, Path: path, UID: uid, User: userName, GID: gid, Group: groupName})
-	err := fileSystem.getDFSConnector().Chown(path, userName, groupName)
+	err = fileSystem.getDFSConnector().Chown(path, userName, groupName)
 
 	if err != nil {
 		return err
@@ -92,4 +105,15 @@ func UpdateTS(attrs *Attrs, fileSystem *FileSystem, path string, req *fuse.Setat
 	}
 
 	return nil
+}
+
+func getGroupNameFromPath(path string) (string, error) {
+	loginfo("Getting group name from path", Fields{Path: path})
+	result := r.FindAllStringSubmatch(path, -1)
+	//names := r.SubexpNames()
+	if len(result) == 0 {
+		return "", errors.New("could not get project name and dataset name from path " + path)
+	}
+
+	return result[0][1] + "__" + result[0][2], nil
 }

@@ -160,7 +160,10 @@ func parseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.Parse()
 
 	if *version {
-		fmt.Println(VERSION)
+		fmt.Printf("Version: %s\n", VERSION)
+		fmt.Printf("Git commit: %s\n", GITCOMMIT)
+		fmt.Printf("Date: %s\n", BUILDTIME)
+		fmt.Printf("Host: %s\n", HOSTNAME)
 		os.Exit(0)
 	}
 

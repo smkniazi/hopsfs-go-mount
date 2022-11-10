@@ -6,7 +6,7 @@
 GITCOMMIT=`git rev-parse --short HEAD`
 BUILDTIME=`date +%FT%T%z`
 HOSTNAME=`hostname`
-VERSION = $(shell grep "VERSION" Version.go | grep -ioh "[0-9\.]*")
+VERSION=$(shell grep "VERSION" Version.go | awk '{ print $$3 }' | tr -d \")
 
 all: hopsfs-mount 
 

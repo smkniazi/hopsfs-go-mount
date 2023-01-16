@@ -3,7 +3,8 @@
 package main
 
 var (
-	//TODO: Add Version tag, manually update
+	// Add Version tag, manually update
+	// Note: redeploy bin to repo.hops.works
 	VERSION = "3.2.0.9"
 
 	// GITCommit overwritten automatically by the build

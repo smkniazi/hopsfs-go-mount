@@ -182,7 +182,7 @@ func (dir *DirINode) LookupAttrs(name string, attrs *Attrs) error {
 		return err
 	}
 
-	logdebug("Stat successful ", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name)})
+	logdebug("Stat successful ", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name), FileSize: attrs.Size})
 	// expiration time := now + 5 secs // TODO: make configurable
 	attrs.Expires = dir.FileSystem.Clock.Now().Add(5 * time.Second)
 	return nil

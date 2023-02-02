@@ -3,18 +3,21 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"io/ioutil"
 	"math/rand"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
 	"bazil.org/fuse/fs/fstestutil"
+	"github.com/colinmarc/hdfs/v2"
+	"logicalclocks.com/hopsfs-mount/ugcache"
 )
 
 func TestReadWriteEmptyFile(t *testing.T) {
@@ -230,37 +233,191 @@ func TestMountSubDir(t *testing.T) {
 	})
 }
 
-func TestGitClone(t *testing.T) {
-	withMount(t, "/", func(mountPoint string, hdfsAccessor HdfsAccessor) {
+// perform lots of seek operations on large files
+func TestSeekLargeFile(t *testing.T) {
+	diskSeekTestFile := "/tmp/diskSeekTestLargeFile"
+	dfsSeekTestFile := "/dfsSeekTestLargeFile"
+	seekTest(t, 10000000 /*numbers in the file*/, diskSeekTestFile, dfsSeekTestFile)
+}
 
-		cloneDir := "cloneDir"
-		fullPath := filepath.Join(mountPoint, cloneDir)
+// perform lots of seek operations on small files
+func TestSeekSmallFile(t *testing.T) {
+	diskSeekTestFile := "/tmp/diskSeekTestSmallFile"
+	dfsSeekTestFile := "/dfsSeekTestSmallFile"
+	seekTest(t, 10000 /*numbers in the file*/, diskSeekTestFile, dfsSeekTestFile)
+}
 
-		//delete the dir if it already exists
-		_, err := os.Stat(fullPath)
-		if os.IsExist(err) {
-			err := rmDir(t, fullPath)
+func seekTest(t *testing.T, dataSize int, diskSeekTestFile string, dfsSeekTestFile string) {
+	addresses := make([]string, 1)
+	addresses[0] = "localhost:8020"
+
+	user, err := ugcache.CurrentUserName()
+	if err != nil {
+		t.Fatalf("couldn't determine user: %s", err)
+	}
+
+	hdfsOptions := hdfs.ClientOptions{
+		Addresses: addresses,
+		User:      user,
+	}
+
+	client, err := hdfs.NewClient(hdfsOptions)
+	if err != nil {
+		t.Fatalf("Failed %v", err)
+	}
+	defer client.Close()
+	fmt.Printf("Connected to DFS\n")
+
+	prepare(t, client, dataSize, diskSeekTestFile, dfsSeekTestFile)
+
+	testSeeks(t, client, diskSeekTestFile, dfsSeekTestFile)
+
+}
+
+func prepare(t *testing.T, client *hdfs.Client, dataSize int, diskTestFile string, dfsTestFile string) {
+
+	recreateDFSFile := false
+	if _, err := os.Stat(diskTestFile); errors.Is(err, os.ErrNotExist) {
+		testFile, err := os.Create(diskTestFile)
+		if err != nil {
+			t.Fatalf("Failed to create test file %v", err)
+		}
+
+		for i := 0; i < dataSize; i++ {
+			number := fmt.Sprintf("%d,", i)
+			testFile.Write([]byte(number))
+		}
+		testFile.Close()
+		recreateDFSFile = true
+	}
+
+	if recreateDFSFile {
+		client.Remove(dfsTestFile)
+	}
+
+	if _, err := client.Stat(dfsTestFile); errors.Is(err, os.ErrNotExist) {
+		dfsWriter, err := client.Create(dfsTestFile)
+		if err != nil {
+			t.Fatalf("Failed %v", err)
+		}
+
+		diskReader, err := os.Open(diskTestFile)
+		if err != nil {
+			t.Fatalf("Failed %v", err)
+		}
+
+		for {
+			buffer := make([]byte, 1024*64)
+			read, err := diskReader.Read(buffer)
+			if read > 0 {
+				written, err := dfsWriter.Write(buffer[:read])
+				if written != read {
+					t.Fatalf("Failed. The amount of read and write data do not match ")
+				}
+				if err != nil {
+					t.Fatalf("Failed %v", err)
+				}
+			}
+
 			if err != nil {
-				t.Errorf("Faile to remove  %s. Error: %v", fullPath, err)
+				break
 			}
 		}
 
-		_, err = exec.Command("git", "clone", "https://github.com/logicalclocks/ndb-chef", fullPath).Output()
+		diskReader.Close()
+		dfsWriter.Close()
+	}
+
+}
+
+func testSeeks(t *testing.T, client *hdfs.Client, diskTestFile string, dfsTestFile string) {
+	fileInfo, _ := os.Stat(diskTestFile)
+	diskReader, _ := os.Open(diskTestFile)
+	dfsReader, _ := client.Open(dfsTestFile)
+	bufferSize := 4 * 1024
+	for i := 0; i < 100000; i++ {
+
+		// seek to random location
+		seek := rand.Int63n(fileInfo.Size())
+
+		// seek to random location at the end of the file
+		// rng := int64(6 * 1024)
+		// random := rand.Int63n(rng)
+		// seek := fileInfo.Size() - rng + random
+
+		// to to a location at the end of the block
+		// blkSize := int64(1024 * 1024)
+		// blk := rand.Int31n(int32(fileInfo.Size()/blkSize)-2) + 1
+		// random := rand.Int63n(int64(bufferSize))
+		// seek := int64(blk)*blkSize - random
+
+		buffer1 := make([]byte, bufferSize)
+		n, err := diskReader.Seek(seek, 0)
+		if n != seek {
+			t.Fatalf("Disk seek did not skip correct number of bytes. Expected: %d, Got: %d", seek, n)
+		}
 		if err != nil {
-			t.Errorf("Unable to clone the repo. Error: %v", err)
+			t.Fatalf("Error in seek %v", err)
+		}
+		diskReadBytes, diskErr := diskReader.Read(buffer1)
+
+		//fmt.Printf("%d) Seek %d, Bytes read from disk are %d, error: %v. Data: %s\n", i, seek, diskReadBytes, diskErr, string(buffer1)[:30])
+
+		buffer2 := make([]byte, bufferSize)
+		n, err = dfsReader.Seek(seek, 0)
+		if n != seek {
+			t.Fatalf("DFS seek did not skip correct number of bytes. Expected: %d, Got: %d", seek, n)
+		}
+		if err != nil {
+			t.Fatalf("Error in seek %v", err)
 		}
 
-		//clean
-		err = rmDir(t, fullPath)
-		if err != nil {
-			t.Errorf("Faile to remove  %s. Error: %v", fullPath, err)
+		b := buffer2[:]
+		var dfsErr error
+		var dfsReadBytes int = 0
+		for len(b) > 0 {
+			m, e := dfsReader.Read(b)
+
+			if m > 0 {
+				dfsReadBytes += m
+				b = buffer2[dfsReadBytes:]
+			}
+
+			if e != nil {
+				//fmt.Printf("Error %v\n", e)
+				if dfsReadBytes == 0 || e != io.EOF {
+					dfsErr = e
+				}
+				break
+			}
+
 		}
-	})
+
+		//fmt.Printf("%d) Seek %d, Bytes read from dfs  are %d, error: %v. Data: %s\n\n", i, seek, dfsReadBytes, dfsErr, string(buffer2)[:30])
+
+		if diskReadBytes != dfsReadBytes {
+			fmt.Printf("FS: str %s\n", buffer1)
+			fmt.Printf("DFS: str %s\n", buffer2)
+			t.Fatalf("Size mismatch. Disk read size: %d, DFS read size:  %d", diskReadBytes, dfsReadBytes)
+		}
+
+		if diskErr != dfsErr {
+			t.Fatalf("Error mismatch. Disk error: %v, DFS error:  %v", diskErr, dfsErr)
+		}
+
+		for index := 0; index < bufferSize; index++ {
+			if buffer1[index] != buffer2[index] {
+				fmt.Printf("FS: str %s\n", buffer1)
+				fmt.Printf("DFS: str %s\n", buffer2)
+				t.Fatalf("Bytes at index %d  do not match. Expecting %d, Got %d\n", index, buffer1[index], buffer2[index])
+			}
+		}
+	}
 }
 
 func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor HdfsAccessor)) {
 	t.Helper()
-	//initLogger("debug", false, "")
+	initLogger("info", false, "")
 	hdfsAccessor, _ := NewHdfsAccessor("localhost:8020", WallClock{}, TLSConfig{TLS: false})
 	err := hdfsAccessor.EnsureConnected()
 	if err != nil {

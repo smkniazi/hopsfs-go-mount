@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"os"
 )
 
@@ -35,6 +36,7 @@ func (p *RemoteROFileProxy) ReadAt(b []byte, off int64) (int, error) {
 	if off < 0 {
 		return 0, &os.PathError{Op: "readat", Path: p.file.AbsolutePath(), Err: errors.New("negative offset")}
 	}
+	maxBytesToRead := len(b)
 
 	if err := p.hdfsReader.Seek(off); err != nil {
 		return 0, err
@@ -44,33 +46,49 @@ func (p *RemoteROFileProxy) ReadAt(b []byte, off int64) (int, error) {
 	var n int = 0
 	for len(b) > 0 {
 		m, e := p.hdfsReader.Read(b)
+
+		if m > 0 {
+			n += m
+			b = b[m:]
+		}
+
 		if e != nil {
 			err = e
 			break
 		}
-		n += m
-		b = b[m:]
 	}
 
-	logdebug("RemoteFileProxy ReadAt", p.file.logInfo(Fields{Operation: Read, Bytes: n, Error: err, Offset: off}))
+	if err != nil && err == io.EOF && n > 0 {
+		// no need to throw io.EOF
+		err = nil
+	}
+
+	logdebug("RemoteFileProxy ReadAt", p.file.logInfo(Fields{Operation: Read, MaxBytesToRead: maxBytesToRead,
+		BytesRead: n, Error: err, Offset: off}))
 	return n, err
 }
 
 func (p *RemoteROFileProxy) SeekToStart() (err error) {
 	p.file.lockFileHandles()
 	defer p.file.unlockFileHandles()
-	return p.hdfsReader.Seek(0)
+	err = p.hdfsReader.Seek(0)
+	logdebug("RemoteFileProxy SeekToStart", p.file.logInfo(Fields{Operation: SeekToStart, Offset: 0, Error: err}))
+	return err
 }
 
 func (p *RemoteROFileProxy) Read(b []byte) (n int, err error) {
 	p.file.lockFileHandles()
 	defer p.file.unlockFileHandles()
-	return p.hdfsReader.Read(b)
+	n, err = p.hdfsReader.Read(b)
+	logdebug("RemoteFileProxy Read", p.file.logInfo(Fields{Operation: Read, MaxBytesToRead: len(b), TotalBytesRead: n, Error: err}))
+	return n, err
 }
 
 func (p *RemoteROFileProxy) Close() error {
 	//NOTE: Locking is done in File.go
-	return p.hdfsReader.Close()
+	err := p.hdfsReader.Close()
+	logdebug("RemoteFileProxy Close", p.file.logInfo(Fields{Operation: Close, Error: err}))
+	return err
 }
 
 func (p *RemoteROFileProxy) Sync() error {

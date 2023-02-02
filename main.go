@@ -211,7 +211,7 @@ func getMountOptions(ro bool) []fuse.MountOption {
 		fuse.Subtype("hopsfs"),
 		fuse.VolumeName("HopsFS filesystem"),
 		fuse.AllowOther(),
-		fuse.WritebackCache(),
+		fuse.WritebackCache(),        // write to kernel cache, improves performance for small writes
 		fuse.MaxReadahead(1024 * 64), //TODO: make configurable
 		fuse.DefaultPermissions(),
 	}

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"sync"
 
@@ -75,9 +76,12 @@ func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fus
 
 	if err != nil {
 		if err == io.EOF {
-			// EOF isn't a error, reporting successful read to FUSE
 			logdebug("Completed reading", fh.logInfo(Fields{Operation: Read, Error: err, Bytes: nr}))
-			return nil
+			if nr > 0 {
+				return nil
+			} else {
+				return err
+			}
 		} else {
 			logerror("Failed to read", fh.logInfo(Fields{Operation: Read, Error: err, Bytes: nr}))
 			return err
@@ -112,7 +116,7 @@ func (fh *FileHandle) copyToDFS(operation string) error {
 	}
 	defer fh.File.InvalidateMetadataCache()
 
-	logdebug("Uploading to DFS", fh.logInfo(Fields{Operation: Write, Bytes: TotalBytesWritten}))
+	logdebug("Uploading to DFS", fh.logInfo(Fields{Operation: Write, Bytes: fh.totalBytesWritten}))
 
 	op := fh.File.FileSystem.RetryPolicy.StartOperation()
 	for {
@@ -151,26 +155,37 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 		return err
 	}
 
-	b := make([]byte, 65536)
-	written := 0
+	written := uint64(0)
 	for {
+		b := make([]byte, 65536)
 		nr, err := fh.File.fileProxy.Read(b)
-		if err != nil {
-			if err != io.EOF {
-				logerror("Failed to read from staging file", fh.logInfo(Fields{Operation: operation, Error: err}))
-			}
-			break
-		}
-		b = b[:nr]
-
-		nw, err := w.Write(b)
-		if err != nil {
-			logerror("Failed to write to DFS", fh.logInfo(Fields{Operation: operation, Error: err}))
-			w.Close()
+		if err != nil && err != io.EOF {
+			logerror("Failed to read from staging file", fh.logInfo(Fields{Operation: operation, Error: err}))
 			return err
 		}
-		logtrace("Written to DFS", fh.logInfo(Fields{Operation: operation, Bytes: nw}))
-		written += nw
+
+		if nr > 0 {
+			b = b[:nr]
+			nw, err := w.Write(b)
+			if err != nil {
+				logerror("Failed to write to DFS", fh.logInfo(Fields{Operation: operation, Error: err}))
+				w.Close()
+				return err
+			}
+
+			if nr != nw {
+				logerror(fmt.Sprintf("Incorrect bytes read/written. Bytes reads %d, %d", nr, nw),
+					fh.logInfo(Fields{Operation: operation, Error: err}))
+				w.Close()
+				return fmt.Errorf("incorrect bytes read/written. Bytes reads %d, %d", nr, nw)
+			}
+
+			written += uint64(nw)
+		}
+
+		if err != nil && err == io.EOF {
+			break
+		}
 	}
 
 	err = w.Close()
@@ -179,6 +194,8 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 		return err
 	}
 	loginfo("Uploaded to DFS", fh.logInfo(Fields{Operation: operation, Bytes: written}))
+
+	fh.File.Attrs.Size = written
 	return nil
 }
 

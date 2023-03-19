@@ -19,6 +19,7 @@ import (
 
 // Interface for accessing HDFS
 // Concurrency: thread safe: handles unlimited number of concurrent requests
+var hadoopUserName string = os.Getenv("HADOOP_USER_NAME")
 var hadoopUserID uint32 = 0
 
 type HdfsAccessor interface {
@@ -98,18 +99,23 @@ func (dfs *hdfsAccessorImpl) ConnectToNameNode() (*hdfs.Client, error) {
 
 // Performs an attempt to connect to the HDFS name
 func (dfs *hdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
-	if hadoopUserName == "" {
+	if hopsfsUserName != "" {
+		hadoopUserName = hopsfsUserName
+		// if it exists we can look it up, otherwise it will always be 0
+		hadoopUserID = ugcache.LookupUId(hadoopUserName)
+	} else {
 		u, err := ugcache.CurrentUserName()
 		if err != nil {
 			return nil, fmt.Errorf("couldn't determine user: %s", err)
 		}
 		hadoopUserName = u
+		hadoopUserID = ugcache.LookupUId(hadoopUserName)
+		if hadoopUserName != "root" && hadoopUserID == 0 {
+			logwarn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", hopsfsUserName), nil)
+		}
 	}
-	hadoopUserID = ugcache.LookupUId(hadoopUserName)
-	if hadoopUserName != "root" && hadoopUserID == 0 {
-		logwarn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", hadoopUserName), nil)
-	}
-	loginfo(fmt.Sprintf("Connecting as user: %s", hadoopUserName, hadoopUserID), nil)
+
+	loginfo(fmt.Sprintf("Connecting as user: %s", hopsfsUserName, hadoopUserID), nil)
 
 	// Performing an attempt to connect to the name node
 	// Colinmar's hdfs implementation has supported the multiple name node connection
@@ -267,26 +273,30 @@ func (dfs *hdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 	}
 
 	modificationTime := time.Unix(int64(fi.ModificationTime())/1000, 0)
-	gid := ugcache.LookupGid(fi.OwnerGroup())
-	if fi.OwnerGroup() != "root" && gid == 0 {
-		logwarn(fmt.Sprintf("Unable to find group id for group: %s, returning gid: 0", fi.OwnerGroup()), nil)
-	}
 
+	gid := ugcache.LookupGid(fi.OwnerGroup())
 	uid := ugcache.LookupUId(fi.Owner())
-	if fi.Owner() != "root" && uid == 0 {
-		logwarn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", fi.Owner()), nil)
+
+	// suppress these logs if hopsfsUserName is provided
+	if hopsfsUserName != "" {
+		if fi.OwnerGroup() != "root" && gid == 0 {
+			logwarn(fmt.Sprintf("Unable to find group id for group: %s, returning gid: 0", fi.OwnerGroup()), nil)
+		}
+
+		if fi.Owner() != "root" && uid == 0 {
+			logwarn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", fi.Owner()), nil)
+		}
 	}
 
 	return Attrs{
-		Inode:  fi.FileId(),
-		Name:   fileInfo.Name(),
-		Mode:   mode,
-		Size:   fi.Length(),
-		Uid:    uid,
-		Mtime:  modificationTime,
-		Ctime:  modificationTime,
-		Crtime: modificationTime,
-		Gid:    gid}
+		Inode: fi.FileId(),
+		Name:  fileInfo.Name(),
+		Mode:  mode,
+		Size:  fi.Length(),
+		Uid:   uid,
+		Mtime: modificationTime,
+		Ctime: modificationTime,
+		Gid:   gid}
 }
 
 func (dfs *hdfsAccessorImpl) AttrsFromFsInfo(fsInfo hdfs.FsInfo) FsInfo {

@@ -73,7 +73,7 @@ func (filesystem *FileSystem) Unmount(mountPoint string) {
 	}
 	filesystem.Mounted = false
 	loginfo("Unmounting...", nil)
-	cmd := exec.Command("fusermount", "-zu", mountPoint)
+	cmd := exec.Command("fusermount3", "-zu", mountPoint)
 	err := cmd.Run()
 
 	// Closing all the files
@@ -99,13 +99,13 @@ func (filesystem *FileSystem) Root() (fs.Node, error) {
 	gid64, _ := strconv.ParseUint(cu.Gid, 10, 32)
 
 	return &DirINode{FileSystem: filesystem, Parent: nil, Attrs: Attrs{
-		Inode:  1,
-		Uid:    uint32(uid64),
-		Gid:    uint32(gid64),
-		Mode:   0755 | os.ModeDir,
-		Mtime:  filesystem.Clock.Now(),
-		Ctime:  filesystem.Clock.Now(),
-		Crtime: filesystem.Clock.Now()},
+		Inode: 1,
+		Uid:   uint32(uid64),
+		Gid:   uint32(gid64),
+		Mode:  0755 | os.ModeDir,
+		Mtime: filesystem.Clock.Now(),
+		Ctime: filesystem.Clock.Now(),
+	},
 	}, nil
 }
 

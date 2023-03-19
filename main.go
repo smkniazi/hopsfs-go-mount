@@ -33,9 +33,10 @@ var readOnly *bool
 var tls *bool
 var connectors int
 var version *bool
-var hadoopUserName string
-var projectDatasetGroupRegex = regexp.MustCompile(`/*Projects/(?P<projectName>\w+)/(?P<datasetName>\w+)/*`)
-var useGroupFromPath *bool
+var hopsfsUserName string
+var hopfsProjectDatasetGroupRegex = regexp.MustCompile(`/*Projects/(?P<projectName>\w+)/(?P<datasetName>\w+)/*`)
+var useGroupFromHopsFsDatasetPath *bool
+var allowOther *bool
 
 func main() {
 
@@ -128,10 +129,10 @@ func main() {
 	}
 
 	// check if the mount process has an error to report
-	<-c.Ready
-	if err := c.MountError; err != nil {
-		logfatal(fmt.Sprintf("Mount process had errors: %v", err), nil)
-	}
+	//<-c.Ready
+	//if err := c.MountError; err != nil {
+	//	logfatal(fmt.Sprintf("Mount process had errors: %v", err), nil)
+	//}
 }
 
 var Usage = func() {
@@ -158,8 +159,9 @@ func parseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.StringVar(&mntSrcDir, "srcDir", "/", "HopsFS src directory")
 	flag.StringVar(&logFile, "logFile", "", "Log file path. By default the log is written to console")
 	flag.IntVar(&connectors, "numConnections", 1, "Number of connections with the namenode")
-	flag.StringVar(&hadoopUserName, "hadoopUserName", "", "Hadoop username")
-	useGroupFromPath = flag.Bool("getGroupFromPath", false, "Get the group from path. This will work if a project is mounted")
+	flag.StringVar(&hopsfsUserName, "hopsFSUserName", "", " username")
+	useGroupFromHopsFsDatasetPath = flag.Bool("getGroupFromHopsFSDatasetPath", true, "Get the group from hopsfs dataset path. This will work if a hopsworks project is mounted")
+	allowOther = flag.Bool("allowOther", true, "Allow other users to use the filesystem")
 	version = flag.Bool("version", false, "Print version")
 
 	flag.Usage = Usage
@@ -182,11 +184,6 @@ func parseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 		log.Fatalf("Error creating log file. Error: %v", err)
 	}
 	initLogger(logLevel, false, logFile)
-
-	if hadoopUserName == "" && os.Getenv("HADOOP_USER_NAME") != "" {
-		hadoopUserName = os.Getenv("HADOOP_USER_NAME")
-		loginfo(fmt.Sprintf("Using username set in environmental variable HADOOP_USER_NAME : %s ", hadoopUserName), nil)
-	}
 
 	loginfo(fmt.Sprintf("Staging dir is:%s, Using TLS: %v, RetryAttempts: %d,  LogFile: %s", stagingDir, *tls, retryPolicy.MaxAttempts, logFile), nil)
 	loginfo(fmt.Sprintf("hopsfs-mount: current head GITCommit: %s Built time: %s Built by: %s ", GITCOMMIT, BUILDTIME, HOSTNAME), nil)
@@ -220,11 +217,14 @@ func checkLogFileCreation() error {
 func getMountOptions(ro bool) []fuse.MountOption {
 	mountOptions := []fuse.MountOption{fuse.FSName("hopsfs"),
 		fuse.Subtype("hopsfs"),
-		fuse.VolumeName("HopsFS filesystem"),
-		fuse.AllowOther(),
-		fuse.WritebackCache(),        // write to kernel cache, improves performance for small writes
+		fuse.WritebackCache(),
+		// write to kernel cache, improves performance for small writes
 		fuse.MaxReadahead(1024 * 64), //TODO: make configurable
 		fuse.DefaultPermissions(),
+	}
+
+	if *allowOther {
+		mountOptions = append(mountOptions, fuse.AllowOther())
 	}
 
 	if ro {

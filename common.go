@@ -43,8 +43,8 @@ func ChownOp(attrs *Attrs, fileSystem *FileSystem, path string, uid uint32, gid 
 	var userName = ""
 	var groupName = ""
 
-	if hopsfsUserName != "" {
-		userName = hopsfsUserName
+	if forceOverrideUsername != "" {
+		userName = forceOverrideUsername
 	} else {
 		userName = ugcache.LookupUserName(uid)
 		if userName == "" {

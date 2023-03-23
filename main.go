@@ -33,7 +33,7 @@ var readOnly *bool
 var tls *bool
 var connectors int
 var version *bool
-var hopsfsUserName string
+var forceOverrideUsername string
 var hopfsProjectDatasetGroupRegex = regexp.MustCompile(`/*Projects/(?P<projectName>\w+)/(?P<datasetName>\w+)/*`)
 var useGroupFromHopsFsDatasetPath *bool
 var allowOther *bool
@@ -129,10 +129,10 @@ func main() {
 	}
 
 	// check if the mount process has an error to report
-	//<-c.Ready
-	//if err := c.MountError; err != nil {
-	//	logfatal(fmt.Sprintf("Mount process had errors: %v", err), nil)
-	//}
+	<-c.Ready
+	if err := c.MountError; err != nil {
+		logfatal(fmt.Sprintf("Mount process had errors: %v", err), nil)
+	}
 }
 
 var Usage = func() {
@@ -159,7 +159,7 @@ func parseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.StringVar(&mntSrcDir, "srcDir", "/", "HopsFS src directory")
 	flag.StringVar(&logFile, "logFile", "", "Log file path. By default the log is written to console")
 	flag.IntVar(&connectors, "numConnections", 1, "Number of connections with the namenode")
-	flag.StringVar(&hopsfsUserName, "hopsFSUserName", "", " username")
+	flag.StringVar(&forceOverrideUsername, "hopsFSUserName", "", " username")
 	useGroupFromHopsFsDatasetPath = flag.Bool("getGroupFromHopsFSDatasetPath", true, "Get the group from hopsfs dataset path. This will work if a hopsworks project is mounted")
 	allowOther = flag.Bool("allowOther", true, "Allow other users to use the filesystem")
 	version = flag.Bool("version", false, "Print version")

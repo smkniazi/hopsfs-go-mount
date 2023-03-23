@@ -20,6 +20,7 @@ type Attrs struct {
 	Gid     uint32
 	Mtime   time.Time
 	Ctime   time.Time
+	Crtime  time.Time
 	Expires time.Time // indicates when cached attribute information expires
 }
 
@@ -41,6 +42,7 @@ func (attrs *Attrs) ConvertAttrToFuse(a *fuse.Attr) error {
 	a.Gid = attrs.Gid
 	a.Mtime = attrs.Mtime
 	a.Ctime = attrs.Ctime
+	a.Crtime = attrs.Crtime
 	return nil
 }
 

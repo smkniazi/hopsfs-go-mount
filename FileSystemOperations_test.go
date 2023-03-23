@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"bazil.org/fuse/fs/fstestutil"
+	"github.com/colinmarc/hdfs/v2"
 	"logicalclocks.com/hopsfs-mount/ugcache"
 )
 
@@ -418,7 +419,6 @@ func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor
 	t.Helper()
 	initLogger("info", false, "")
 	hdfsAccessor, _ := NewHdfsAccessor("localhost:8020", WallClock{}, TLSConfig{TLS: false})
-
 	err := hdfsAccessor.EnsureConnected()
 	if err != nil {
 		t.Fatalf(fmt.Sprintf("Error/NewHdfsAccessor: %v ", err), nil)

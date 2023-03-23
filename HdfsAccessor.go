@@ -19,7 +19,7 @@ import (
 
 // Interface for accessing HDFS
 // Concurrency: thread safe: handles unlimited number of concurrent requests
-var hadoopUserName string = os.Getenv("HADOOP_USER_NAME")
+var hadoopUserName string
 var hadoopUserID uint32 = 0
 
 type HdfsAccessor interface {
@@ -99,23 +99,27 @@ func (dfs *hdfsAccessorImpl) ConnectToNameNode() (*hdfs.Client, error) {
 
 // Performs an attempt to connect to the HDFS name
 func (dfs *hdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
-	if hopsfsUserName != "" {
-		hadoopUserName = hopsfsUserName
+	if forceOverrideUsername != "" {
+		hadoopUserName = forceOverrideUsername
 		// if it exists we can look it up, otherwise it will always be 0
 		hadoopUserID = ugcache.LookupUId(hadoopUserName)
 	} else {
-		u, err := ugcache.CurrentUserName()
-		if err != nil {
-			return nil, fmt.Errorf("couldn't determine user: %s", err)
+		u := os.Getenv("HADOOP_USER_NAME")
+		if u == "" {
+			currentUser, err := ugcache.CurrentUserName()
+			if err != nil {
+				return nil, fmt.Errorf("couldn't determine user: %s", err)
+			}
+			u = currentUser
 		}
 		hadoopUserName = u
 		hadoopUserID = ugcache.LookupUId(hadoopUserName)
 		if hadoopUserName != "root" && hadoopUserID == 0 {
-			logwarn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", hopsfsUserName), nil)
+			logwarn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", forceOverrideUsername), nil)
 		}
 	}
 
-	loginfo(fmt.Sprintf("Connecting as user: %s", hopsfsUserName, hadoopUserID), nil)
+	loginfo(fmt.Sprintf("Connecting as user: %s UID: %d", forceOverrideUsername, hadoopUserID), nil)
 
 	// Performing an attempt to connect to the name node
 	// Colinmar's hdfs implementation has supported the multiple name node connection
@@ -277,8 +281,8 @@ func (dfs *hdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 	gid := ugcache.LookupGid(fi.OwnerGroup())
 	uid := ugcache.LookupUId(fi.Owner())
 
-	// suppress these logs if hopsfsUserName is provided
-	if hopsfsUserName != "" {
+	// suppress these logs if forceOverrideUsername is provided
+	if forceOverrideUsername != "" {
 		if fi.OwnerGroup() != "root" && gid == 0 {
 			logwarn(fmt.Sprintf("Unable to find group id for group: %s, returning gid: 0", fi.OwnerGroup()), nil)
 		}
@@ -289,14 +293,15 @@ func (dfs *hdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 	}
 
 	return Attrs{
-		Inode: fi.FileId(),
-		Name:  fileInfo.Name(),
-		Mode:  mode,
-		Size:  fi.Length(),
-		Uid:   uid,
-		Mtime: modificationTime,
-		Ctime: modificationTime,
-		Gid:   gid}
+		Inode:  fi.FileId(),
+		Name:   fileInfo.Name(),
+		Mode:   mode,
+		Size:   fi.Length(),
+		Uid:    uid,
+		Mtime:  modificationTime,
+		Ctime:  modificationTime,
+		Crtime: modificationTime,
+		Gid:    gid}
 }
 
 func (dfs *hdfsAccessorImpl) AttrsFromFsInfo(fsInfo hdfs.FsInfo) FsInfo {

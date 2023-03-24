@@ -175,10 +175,10 @@ func parseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 		os.Exit(0)
 	}
 
-	if flag.NArg() != 2 {
-		Usage()
-		os.Exit(2)
-	}
+	// if flag.NArg() != 2 {
+	// Usage()
+	// os.Exit(2)
+	// }
 
 	if err := checkLogFileCreation(); err != nil {
 		log.Fatalf("Error creating log file. Error: %v", err)
@@ -223,9 +223,9 @@ func getMountOptions(ro bool) []fuse.MountOption {
 		fuse.DefaultPermissions(),
 	}
 
-	if *allowOther {
-		mountOptions = append(mountOptions, fuse.AllowOther())
-	}
+	// if *allowOther {
+	// mountOptions = append(mountOptions, fuse.AllowOther())
+	// }
 
 	if ro {
 		mountOptions = append(mountOptions, fuse.ReadOnly())

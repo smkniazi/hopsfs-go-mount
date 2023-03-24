@@ -5,13 +5,14 @@ package main
 
 import (
 	"fmt"
-	"github.com/colinmarc/hdfs/v2"
 	"io"
 	"os"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/colinmarc/hdfs/v2"
 
 	"bazil.org/fuse"
 	"logicalclocks.com/hopsfs-mount/ugcache"
@@ -92,20 +93,24 @@ func (dfs *hdfsAccessorImpl) ConnectToNameNode() (*hdfs.Client, error) {
 	client, err := dfs.connectToNameNodeImpl()
 	if err != nil {
 		// Connection failed
-		return nil, fmt.Errorf("fail to connect to name node with error: %s", err.Error())
+		return nil, fmt.Errorf("failed to connect to name node with error: %v", err)
 	}
 	return client, nil
 }
 
 // Performs an attempt to connect to the HDFS name
 func (dfs *hdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
+	fmt.Printf("here0\n")
 	if forceOverrideUsername != "" {
+		fmt.Printf("here1\n")
 		hadoopUserName = forceOverrideUsername
 		// if it exists we can look it up, otherwise it will always be 0
 		hadoopUserID = ugcache.LookupUId(hadoopUserName)
 	} else {
-		hadoopUserName := os.Getenv("HADOOP_USER_NAME")
+		fmt.Printf("here2\n")
+		hadoopUserName = os.Getenv("HADOOP_USER_NAME")
 		if hadoopUserName == "" {
+			fmt.Printf("here3\n")
 			currentSystemUser, err := ugcache.CurrentUserName()
 			if err != nil {
 				return nil, fmt.Errorf("couldn't determine user: %s", err)
@@ -118,7 +123,7 @@ func (dfs *hdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 		}
 	}
 
-	loginfo(fmt.Sprintf("Connecting as user: %s UID: %d", forceOverrideUsername, hadoopUserID), nil)
+	loginfo(fmt.Sprintf("Connecting as user: %s UID: %d", hadoopUserName, hadoopUserID), nil)
 
 	// Performing an attempt to connect to the name node
 	// Colinmar's hdfs implementation has supported the multiple name node connection

@@ -280,15 +280,17 @@ func (dfs *hdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 	}
 
 	return Attrs{
-		Inode:  fi.FileId(),
-		Name:   fileInfo.Name(),
-		Mode:   mode,
-		Size:   fi.Length(),
-		Uid:    uid,
-		Mtime:  modificationTime,
-		Ctime:  modificationTime,
-		Crtime: modificationTime,
-		Gid:    gid}
+		Inode:   fi.FileId(),
+		Name:    fileInfo.Name(),
+		Mode:    mode,
+		Size:    fi.Length(),
+		Uid:     uid,
+		Mtime:   modificationTime,
+		Ctime:   modificationTime,
+		Crtime:  modificationTime,
+		Gid:     gid,
+		Expires: dfs.Clock.Now().Add(5 * time.Second),
+	}
 }
 
 func (dfs *hdfsAccessorImpl) AttrsFromFsInfo(fsInfo hdfs.FsInfo) FsInfo {

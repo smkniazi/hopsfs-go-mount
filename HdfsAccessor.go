@@ -201,8 +201,8 @@ func (dfs *hdfsAccessorImpl) ReadDir(path string) ([]Attrs, error) {
 			return nil, unwrapAndTranslateError(err)
 		}
 		// We've got error from this client, setting to nil, so we try another one next time
+		dfs.MetadataClient.Close()
 		dfs.MetadataClient = nil
-		// TODO: attempt to gracefully close the conenction
 		return nil, unwrapAndTranslateError(err)
 	}
 	allAttrs := make([]Attrs, len(files))
@@ -230,8 +230,8 @@ func (dfs *hdfsAccessorImpl) Stat(path string) (Attrs, error) {
 			return Attrs{}, unwrapAndTranslateError(err)
 		}
 		// We've got error from this client, setting to nil, so we try another one next time
+		dfs.MetadataClient.Close()
 		dfs.MetadataClient = nil
-		// TODO: attempt to gracefully close the conenction
 		return Attrs{}, unwrapAndTranslateError(err)
 	}
 	return dfs.AttrsFromFileInfo(fileInfo), nil
@@ -253,6 +253,7 @@ func (dfs *hdfsAccessorImpl) StatFs() (FsInfo, error) {
 		if IsSuccessOrNonRetriableError(err) {
 			return FsInfo{}, unwrapAndTranslateError(err)
 		}
+		dfs.MetadataClient.Close()
 		dfs.MetadataClient = nil
 		return FsInfo{}, unwrapAndTranslateError(err)
 	}
@@ -280,15 +281,17 @@ func (dfs *hdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 	}
 
 	return Attrs{
-		Inode:  fi.FileId(),
-		Name:   fileInfo.Name(),
-		Mode:   mode,
-		Size:   fi.Length(),
-		Uid:    uid,
-		Mtime:  modificationTime,
-		Ctime:  modificationTime,
-		Crtime: modificationTime,
-		Gid:    gid}
+		Inode:   fi.FileId(),
+		Name:    fileInfo.Name(),
+		Mode:    mode,
+		Size:    fi.Length(),
+		Uid:     uid,
+		Mtime:   modificationTime,
+		Ctime:   modificationTime,
+		Crtime:  modificationTime,
+		Gid:     gid,
+		Expires: dfs.Clock.Now().Add(5 * time.Second),
+	}
 }
 
 func (dfs *hdfsAccessorImpl) AttrsFromFsInfo(fsInfo hdfs.FsInfo) FsInfo {

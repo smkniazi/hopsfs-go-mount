@@ -4,6 +4,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -42,12 +43,26 @@ func ChownOp(attrs *Attrs, fileSystem *FileSystem, path string, uid uint32, gid 
 	var userName = ""
 	var groupName = ""
 
-	userName = ugcache.LookupUserName(uid)
-	if userName == "" {
-		return fmt.Errorf(fmt.Sprintf("Setattr failed. Unable to find user information. Path %s", path))
+	if forceOverrideUsername != "" {
+		userName = forceOverrideUsername
+	} else {
+		userName = ugcache.LookupUserName(uid)
+		if userName == "" {
+			return fmt.Errorf(fmt.Sprintf("Setattr failed. Unable to find user information. Path %s", path))
+		}
 	}
 
-	groupName = ugcache.LookupGroupName(gid)
+	if *useGroupFromHopsFsDatasetPath {
+		pathGroupName, err := getGroupNameFromPath(path)
+		if err == nil {
+			groupName = pathGroupName
+		} else {
+			logwarn(err.Error(), Fields{Path: path})
+		}
+	} else {
+		groupName = ugcache.LookupGroupName(gid)
+	}
+
 	if groupName == "" {
 		return fmt.Errorf(fmt.Sprintf("Setattr failed. Unable to find group information. Path %s", path))
 	}
@@ -92,4 +107,14 @@ func UpdateTS(attrs *Attrs, fileSystem *FileSystem, path string, req *fuse.Setat
 	}
 
 	return nil
+}
+
+func getGroupNameFromPath(path string) (string, error) {
+	loginfo("Getting group name from path", Fields{Path: path})
+	result := hopfsProjectDatasetGroupRegex.FindAllStringSubmatch(path, -1)
+	if len(result) == 0 {
+		return "", errors.New("could not get project name and dataset name from path " + path)
+	}
+
+	return result[0][1] + "__" + result[0][2], nil
 }

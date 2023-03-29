@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -32,6 +33,10 @@ var readOnly *bool
 var tls *bool
 var connectors int
 var version *bool
+var forceOverrideUsername string
+var hopfsProjectDatasetGroupRegex = regexp.MustCompile(`/*Projects/(?P<projectName>\w+)/(?P<datasetName>\w+)/\/*`)
+var useGroupFromHopsFsDatasetPath *bool
+var allowOther *bool
 
 func main() {
 
@@ -154,6 +159,9 @@ func parseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.StringVar(&mntSrcDir, "srcDir", "/", "HopsFS src directory")
 	flag.StringVar(&logFile, "logFile", "", "Log file path. By default the log is written to console")
 	flag.IntVar(&connectors, "numConnections", 1, "Number of connections with the namenode")
+	flag.StringVar(&forceOverrideUsername, "hopsFSUserName", "", " username")
+	useGroupFromHopsFsDatasetPath = flag.Bool("getGroupFromHopsFSDatasetPath", false, "Get the group from hopsfs dataset path. This will work if a hopsworks project is mounted")
+	allowOther = flag.Bool("allowOther", true, "Allow other users to use the filesystem")
 	version = flag.Bool("version", false, "Print version")
 
 	flag.Usage = Usage
@@ -209,11 +217,14 @@ func checkLogFileCreation() error {
 func getMountOptions(ro bool) []fuse.MountOption {
 	mountOptions := []fuse.MountOption{fuse.FSName("hopsfs"),
 		fuse.Subtype("hopsfs"),
-		fuse.VolumeName("HopsFS filesystem"),
-		fuse.AllowOther(),
-		fuse.WritebackCache(),        // write to kernel cache, improves performance for small writes
+		fuse.WritebackCache(),
+		// write to kernel cache, improves performance for small writes
 		fuse.MaxReadahead(1024 * 64), //TODO: make configurable
 		fuse.DefaultPermissions(),
+	}
+
+	if *allowOther {
+		mountOptions = append(mountOptions, fuse.AllowOther())
 	}
 
 	if ro {

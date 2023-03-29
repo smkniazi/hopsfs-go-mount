@@ -19,6 +19,10 @@ Options:
         Client key location (default "/srv/hops/super_crypto/hdfs/hdfs_priv.pem")
   -fuse.debug
         log FUSE processing details
+  -getGroupFromPath
+    	Get the group from path. This will work if a hopsworks project is mounted
+  -hadoopUserName string
+    	Hadoop username        
   -lazy
         Allows to mount HopsFS filesystem before HopsFS is available
   -logFile string

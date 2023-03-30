@@ -143,16 +143,16 @@ var Usage = func() {
 }
 
 func parseArgsAndInitLogger(retryPolicy *RetryPolicy) {
-	lazyMount = *flag.Bool("lazy", false, "Allows to mount HopsFS filesystem before HopsFS is available")
+	flag.BoolVar(&lazyMount, "lazy", false, "Allows to mount HopsFS filesystem before HopsFS is available")
 	flag.DurationVar(&retryPolicy.TimeLimit, "retryTimeLimit", 5*time.Minute, "time limit for all retry attempts for failed operations")
 	flag.IntVar(&retryPolicy.MaxAttempts, "retryMaxAttempts", 10, "Maxumum retry attempts for failed operations")
 	flag.DurationVar(&retryPolicy.MinDelay, "retryMinDelay", 1*time.Second, "minimum delay between retries (note, first retry always happens immediatelly)")
 	flag.DurationVar(&retryPolicy.MaxDelay, "retryMaxDelay", 60*time.Second, "maximum delay between retries")
-	allowedPrefixesString = *flag.String("allowedPrefixes", "*", "Comma-separated list of allowed path prefixes on the remote file system, if specified the mount point will expose access to those prefixes only")
-	readOnly = *flag.Bool("readOnly", false, "Enables mount with readonly")
+	flag.StringVar(&allowedPrefixesString, "allowedPrefixes", "*", "Comma-separated list of allowed path prefixes on the remote file system, if specified the mount point will expose access to those prefixes only")
+	flag.BoolVar(&readOnly, "readOnly", false, "Enables mount with readonly")
 	flag.StringVar(&logLevel, "logLevel", "info", "logs to be printed. error, warn, info, debug, trace")
 	flag.StringVar(&stagingDir, "stageDir", "/tmp", "stage directory for writing files")
-	tls = *flag.Bool("tls", false, "Enables tls connections")
+	flag.BoolVar(&tls, "tls", false, "Enables tls connections")
 	flag.StringVar(&rootCABundle, "rootCABundle", "/srv/hops/super_crypto/hdfs/hops_root_ca.pem", "Root CA bundle location ")
 	flag.StringVar(&clientCertificate, "clientCertificate", "/srv/hops/super_crypto/hdfs/hdfs_certificate_bundle.pem", "Client certificate location")
 	flag.StringVar(&clientKey, "clientKey", "/srv/hops/super_crypto/hdfs/hdfs_priv.pem", "Client key location")
@@ -160,9 +160,9 @@ func parseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.StringVar(&logFile, "logFile", "", "Log file path. By default the log is written to console")
 	flag.IntVar(&connectors, "numConnections", 1, "Number of connections with the namenode")
 	flag.StringVar(&forceOverrideUsername, "hopsFSUserName", "", " username")
-	useGroupFromHopsFsDatasetPath = *flag.Bool("getGroupFromHopsFSDatasetPath", false, "Get the group from hopsfs dataset path. This will work if a hopsworks project is mounted")
+	flag.BoolVar(&useGroupFromHopsFsDatasetPath, "getGroupFromHopsFSDatasetPath", false, "Get the group from hopsfs dataset path. This will work if a hopsworks project is mounted")
 	allowOther = *flag.Bool("allowOther", true, "Allow other users to use the filesystem")
-	version = *flag.Bool("version", false, "Print version")
+	flag.BoolVar(&version, "version", false, "Print version")
 
 	flag.Usage = Usage
 	flag.Parse()

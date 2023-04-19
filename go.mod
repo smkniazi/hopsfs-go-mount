@@ -3,7 +3,7 @@ module logicalclocks.com/hopsfs-mount
 go 1.15
 
 require (
-	bazil.org/fuse v0.0.0-20200524192727-fb710f7dfd05
+	bazil.org/fuse v0.0.0-20230120002735-62a210ff1fd5
 	github.com/BurntSushi/toml v0.4.1 // indirect
 	github.com/antonfisher/nested-logrus-formatter v1.3.1
 	github.com/colinmarc/hdfs/v2 v2.2.0

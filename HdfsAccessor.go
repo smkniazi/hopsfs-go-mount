@@ -282,7 +282,7 @@ func (dfs *hdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 	uid := ugcache.LookupUId(fi.Owner())
 
 	// suppress these logs if forceOverrideUsername is provided
-	if forceOverrideUsername != "" {
+	if forceOverrideUsername == "" {
 		if fi.OwnerGroup() != "root" && gid == 0 {
 			logwarn(fmt.Sprintf("Unable to find group id for group: %s, returning gid: 0", fi.OwnerGroup()), nil)
 		}
@@ -300,7 +300,6 @@ func (dfs *hdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 		Uid:     uid,
 		Mtime:   modificationTime,
 		Ctime:   modificationTime,
-		Crtime:  modificationTime,
 		Gid:     gid,
 		Expires: dfs.Clock.Now().Add(5 * time.Second),
 	}

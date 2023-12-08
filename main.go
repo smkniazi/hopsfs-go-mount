@@ -211,8 +211,9 @@ func checkLogFileCreation() error {
 func getMountOptions(ro bool) []fuse.MountOption {
 	mountOptions := []fuse.MountOption{fuse.FSName("hopsfs"),
 		fuse.Subtype("hopsfs"),
-		fuse.WritebackCache(),
-		// write to kernel cache, improves performance for small writes
+		// fuse.WritebackCache(), // write to kernel cache, improves performance for small writes.
+		// NOTE: It creates problem when reading file updated by external clients
+		// https://www.kernel.org/doc/Documentation/filesystems/fuse-io.txt
 		fuse.MaxReadahead(1024 * 64), //TODO: make configurable
 		fuse.DefaultPermissions(),
 	}

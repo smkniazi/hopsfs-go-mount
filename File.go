@@ -275,6 +275,7 @@ func (file *FileINode) downloadToStaging(stagingFile *os.File, operation string)
 
 // Creates new file handle
 func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*FileHandle, error) {
+
 	file.lockFileHandles()
 	defer file.unlockFileHandles()
 
@@ -297,11 +298,11 @@ func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*F
 			return nil, err
 		}
 		fh.File.fileProxy = &LocalRWFileProxy{localFile: stagingFile, file: file}
-		loginfo("Opened file, RW handle", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags}))
+		loginfo("Opened file, RW handle", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags, FileSize: file.Attrs.Size}))
 	} else {
 		if file.fileProxy != nil {
 			fh.File.fileProxy = file.fileProxy
-			loginfo("Opened file, Returning existing handle", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags}))
+			loginfo("Opened file, Returning existing handle", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags, FileSize: file.Attrs.Size}))
 		} else {
 			// we alway open the file in RO mode. when the client writes to the file
 			// then we upgrade the handle. However, if the file is already opened in
@@ -309,7 +310,7 @@ func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*F
 			// if file.handle
 			reader, _ := file.FileSystem.getDFSConnector().OpenRead(file.AbsolutePath())
 			fh.File.fileProxy = &RemoteROFileProxy{hdfsReader: reader, file: file}
-			loginfo("Opened file, RO handle", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags}))
+			loginfo("Opened file, RO handle", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags, FileSize: file.Attrs.Size}))
 		}
 	}
 
@@ -356,7 +357,7 @@ func (file *FileINode) upgradeHandleForWriting(me *FileHandle) error {
 		}
 
 		file.fileProxy = &LocalRWFileProxy{localFile: stagingFile, file: file}
-		loginfo("Open handle upgrade to support RW ", file.logInfo(Fields{Operation: "Open"}))
+		loginfo("Opened file, handle upgraded to support RW ", file.logInfo(Fields{Operation: "Open", FileSize: file.Attrs.Size}))
 		return nil
 	}
 }

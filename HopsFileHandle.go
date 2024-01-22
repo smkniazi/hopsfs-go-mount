@@ -43,7 +43,7 @@ func (fh *FileHandle) Truncate(size int64) error {
 	defer fh.unlockHandle()
 
 	// as an optimization the file is initially opened in readonly mode
-	fh.File.upgradeHandleForWriting(fh)
+	fh.File.upgradeHandleForWriting(fh, Truncate)
 
 	sizeChanged, err := fh.File.fileProxy.Truncate(size)
 	if err != nil {
@@ -96,7 +96,7 @@ func (fh *FileHandle) Write(ctx context.Context, req *fuse.WriteRequest, resp *f
 	defer fh.unlockHandle()
 
 	// as an optimization the file is initially opened in readonly mode
-	fh.File.upgradeHandleForWriting(fh)
+	fh.File.upgradeHandleForWriting(fh, Write)
 
 	nw, err := fh.File.fileProxy.WriteAt(req.Data, req.Offset)
 	resp.Size = nw
@@ -116,7 +116,7 @@ func (fh *FileHandle) copyToDFS(operation string) error {
 	}
 	defer fh.File.InvalidateMetadataCache()
 
-	logdebug("Uploading to DFS", fh.logInfo(Fields{Operation: Write, Bytes: fh.totalBytesWritten}))
+	logdebug("Uploading to DFS", fh.logInfo(Fields{Operation: operation, Bytes: fh.totalBytesWritten}))
 
 	op := fh.File.FileSystem.RetryPolicy.StartOperation()
 	for {

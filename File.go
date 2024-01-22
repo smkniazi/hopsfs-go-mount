@@ -81,7 +81,7 @@ func (file *FileINode) Open(ctx context.Context, req *fuse.OpenRequest, resp *fu
 	file.lockFile()
 	defer file.unlockFile()
 
-	logdebug("Opening file", Fields{Operation: Open, Path: file.AbsolutePath(), Flags: req.Flags})
+	logdebug("Opening file", Fields{Operation: Open, Path: file.AbsolutePath(), Flags: req.Flags, FileSize: file.Attrs.Size})
 	handle, err := file.NewFileHandle(true, req.Flags)
 	if err != nil {
 		return nil, err
@@ -173,17 +173,20 @@ func (file *FileINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, re
 	file.lockFile()
 	defer file.unlockFile()
 
+	logdebug("Setattr request received: ", Fields{Operation: Setattr})
+
 	if req.Valid.Size() {
-		var err error = nil
+		var err_out error = nil
+		loginfo(fmt.Sprintf("Dispatching truncate request to all open handles: %d", len(file.activeHandles)), Fields{Operation: Setattr})
 		for _, handle := range file.activeHandles {
 			err := handle.Truncate(int64(req.Size))
 			if err != nil {
-				err = err
+				err_out = err
 			}
 			resp.Attr.Size = req.Size
 			file.Attrs.Size = req.Size
 		}
-		return err
+		return err_out
 	}
 
 	path := file.AbsolutePath()
@@ -308,10 +311,14 @@ func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*F
 			// we alway open the file in RO mode. when the client writes to the file
 			// then we upgrade the handle. However, if the file is already opened in
 			// in RW state then we use the existing RW handle
-			// if file.handle
-			reader, _ := file.FileSystem.getDFSConnector().OpenRead(file.AbsolutePath())
-			fh.File.fileProxy = &RemoteROFileProxy{hdfsReader: reader, file: file}
-			loginfo("Opened file, RO handle", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags}))
+			reader, err := file.FileSystem.getDFSConnector().OpenRead(file.AbsolutePath())
+			if err != nil {
+				logwarn("Opening file failed", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags, Error: err}))
+				return nil, err
+			} else {
+				fh.File.fileProxy = &RemoteROFileProxy{hdfsReader: reader, file: file}
+				loginfo("Opened file, RO handle", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags}))
+			}
 		}
 	}
 
@@ -319,7 +326,7 @@ func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*F
 }
 
 // changes RO file handle to RW
-func (file *FileINode) upgradeHandleForWriting(me *FileHandle) error {
+func (file *FileINode) upgradeHandleForWriting(me *FileHandle, operation string) error {
 	file.lockFileHandles()
 	defer file.unlockFileHandles()
 
@@ -335,6 +342,8 @@ func (file *FileINode) upgradeHandleForWriting(me *FileHandle) error {
 	if !upgrade {
 		return nil
 	} else {
+
+		loginfo(fmt.Sprintf("Upgrading file handle for writing. Active handles %d", len(file.activeHandles)), file.logInfo(Fields{Operation: operation}))
 
 		//lock n unlock all handles
 		for _, h := range file.activeHandles {
@@ -358,7 +367,7 @@ func (file *FileINode) upgradeHandleForWriting(me *FileHandle) error {
 		}
 
 		file.fileProxy = &LocalRWFileProxy{localFile: stagingFile, file: file}
-		loginfo("Open handle upgrade to support RW ", file.logInfo(Fields{Operation: "Open"}))
+		loginfo("Open handle upgrade to support RW ", file.logInfo(Fields{Operation: operation}))
 		return nil
 	}
 }

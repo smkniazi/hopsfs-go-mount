@@ -38,6 +38,10 @@ var useGroupFromHopsFsDatasetPath bool = false
 var allowOther bool = false
 var hopfsProjectDatasetGroupRegex = regexp.MustCompile(`/*Projects/(?P<projectName>\w+)/(?P<datasetName>\w+)/\/*`)
 
+const (
+	STAT_CACHE_TIME = 5 * time.Second
+)
+
 func main() {
 
 	retryPolicy := NewDefaultRetryPolicy(WallClock{})

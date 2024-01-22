@@ -59,7 +59,9 @@ func (dir *DirINode) Attr(ctx context.Context, a *fuse.Attr) error {
 		if err != nil {
 			return err
 		}
-
+	} else {
+		loginfo("Stat successful. Returning from Cache ", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), dir.Attrs.Name), FileSize: dir.Attrs.Size,
+			IsDir: dir.Attrs.Mode.IsDir(), IsRegular: dir.Attrs.Mode.IsRegular()})
 	}
 	return dir.Attrs.ConvertAttrToFuse(a)
 }
@@ -181,7 +183,8 @@ func (dir *DirINode) LookupAttrs(name string, attrs *Attrs) error {
 		return err
 	}
 
-	logdebug("Stat successful ", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name), FileSize: attrs.Size})
+	loginfo("Stat successful ", Fields{Operation: Stat, Path: path.Join(dir.AbsolutePath(), name), FileSize: attrs.Size,
+		IsDir: attrs.Mode.IsDir(), IsRegular: attrs.Mode.IsRegular()})
 	return nil
 }
 

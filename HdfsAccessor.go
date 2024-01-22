@@ -5,13 +5,14 @@ package main
 
 import (
 	"fmt"
-	"github.com/colinmarc/hdfs/v2"
 	"io"
 	"os"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/colinmarc/hdfs/v2"
 
 	"bazil.org/fuse"
 	"logicalclocks.com/hopsfs-mount/ugcache"
@@ -183,7 +184,13 @@ func (dfs *hdfsAccessorImpl) CreateFile(path string, mode os.FileMode, overwrite
 			return nil, err
 		}
 	}
-	writer, err := dfs.MetadataClient.CreateFile(path, 3, 64*1024*1024, mode, overwrite)
+
+	serverDefaults, err := dfs.MetadataClient.ServerDefaults()
+	if err != nil {
+		return nil, err
+	}
+
+	writer, err := dfs.MetadataClient.CreateFile(path, serverDefaults.Replication, serverDefaults.BlockSize, mode, overwrite)
 	if err != nil {
 		return nil, unwrapAndTranslateError(err)
 	}
@@ -301,7 +308,7 @@ func (dfs *hdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 		Mtime:   modificationTime,
 		Ctime:   modificationTime,
 		Gid:     gid,
-		Expires: dfs.Clock.Now().Add(5 * time.Second),
+		Expires: dfs.Clock.Now().Add(STAT_CACHE_TIME),
 	}
 }
 

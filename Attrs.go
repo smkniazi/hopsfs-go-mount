@@ -41,6 +41,7 @@ func (attrs *Attrs) ConvertAttrToFuse(a *fuse.Attr) error {
 	a.Gid = attrs.Gid
 	a.Mtime = attrs.Mtime
 	a.Ctime = attrs.Ctime
+	a.Valid = STAT_CACHE_TIME
 	return nil
 }
 

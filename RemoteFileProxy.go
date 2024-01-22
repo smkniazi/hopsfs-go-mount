@@ -33,6 +33,8 @@ func (p *RemoteROFileProxy) ReadAt(b []byte, off int64) (int, error) {
 	p.file.lockFileHandles()
 	defer p.file.unlockFileHandles()
 
+	logdebug("RemoteFileProxy ReadAt", p.file.logInfo(Fields{Operation: Read, Offset: off}))
+
 	if off < 0 {
 		return 0, &os.PathError{Op: "readat", Path: p.file.AbsolutePath(), Err: errors.New("negative offset")}
 	}
@@ -72,29 +74,48 @@ func (p *RemoteROFileProxy) ReadAt(b []byte, off int64) (int, error) {
 func (p *RemoteROFileProxy) SeekToStart() (err error) {
 	p.file.lockFileHandles()
 	defer p.file.unlockFileHandles()
+
 	err = p.hdfsReader.Seek(0)
-	logdebug("RemoteFileProxy SeekToStart", p.file.logInfo(Fields{Operation: SeekToStart, Offset: 0, Error: err}))
-	return err
+	if err != nil {
+		logdebug("RemoteFileProxy SeekToStart failed", p.file.logInfo(Fields{Operation: SeekToStart, Offset: 0, Error: err}))
+		return err
+	} else {
+		logdebug("RemoteFileProxy SeekToStart", p.file.logInfo(Fields{Operation: SeekToStart, Offset: 0}))
+		return nil
+	}
+
 }
 
 func (p *RemoteROFileProxy) Read(b []byte) (n int, err error) {
 	p.file.lockFileHandles()
 	defer p.file.unlockFileHandles()
 	n, err = p.hdfsReader.Read(b)
-	logdebug("RemoteFileProxy Read", p.file.logInfo(Fields{Operation: Read, MaxBytesToRead: len(b), TotalBytesRead: n, Error: err}))
-	return n, err
+
+	if err != nil {
+		logdebug("RemoteFileProxy Read", p.file.logInfo(Fields{Operation: Read, MaxBytesToRead: len(b), Error: err}))
+		return n, err
+	} else {
+		logdebug("RemoteFileProxy Read", p.file.logInfo(Fields{Operation: Read, MaxBytesToRead: len(b), TotalBytesRead: n}))
+		return n, nil
+	}
 }
 
 func (p *RemoteROFileProxy) Close() error {
 	//NOTE: Locking is done in File.go
 	err := p.hdfsReader.Close()
-	logdebug("RemoteFileProxy Close", p.file.logInfo(Fields{Operation: Close, Error: err}))
-	return err
+	if err != nil {
+		logdebug("RemoteFileProxy Close failed", p.file.logInfo(Fields{Operation: Close, Error: err}))
+		return err
+	} else {
+		logdebug("RemoteFileProxy Close", p.file.logInfo(Fields{Operation: Close}))
+		return nil
+	}
 }
 
 func (p *RemoteROFileProxy) Sync() error {
 	p.file.lockFileHandles()
 	defer p.file.unlockFileHandles()
+
 	logfatal("Sync API is not supported. Read only mode", nil)
 	return nil
 }

@@ -65,6 +65,9 @@ const (
 	Line              = "line"
 	ReqOffset         = "req_offset"
 	FileHandleID      = "file_handle_id"
+	Setattr           = "Setattr"
+	IsDir             = "IsDir"
+	IsRegular         = "IsRegular"
 )
 
 var ReportCaller = true

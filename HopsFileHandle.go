@@ -207,6 +207,7 @@ func (fh *FileHandle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 		loginfo("Flush file", fh.logInfo(Fields{Operation: Flush}))
 		return fh.copyToDFS(Flush)
 	} else {
+		loginfo("Flush file. Ignoring requst as no data has changed", fh.logInfo(Fields{Operation: Flush}))
 		return nil
 	}
 }

@@ -37,6 +37,13 @@ var _ fs.Node = (*FileINode)(nil)
 var _ fs.NodeOpener = (*FileINode)(nil)
 var _ fs.NodeFsyncer = (*FileINode)(nil)
 var _ fs.NodeSetattrer = (*FileINode)(nil)
+var _ fs.NodeForgetter = (*FileINode)(nil)
+
+func (file *FileINode) Forget() {
+	// ask parent to remove me from the children list
+	logdebug(fmt.Sprintf("Forget for file %s", file.Attrs.Name), nil)
+	file.Parent.removeChildInode(Forget, file.Attrs.Name)
+}
 
 // File is also a factory for ReadSeekCloser objects
 var _ ReadSeekCloserFactory = (*FileINode)(nil)
@@ -58,7 +65,7 @@ func (file *FileINode) Attr(ctx context.Context, a *fuse.Attr) error {
 	if lrwfp, ok := file.fileProxy.(*LocalRWFileProxy); ok {
 		fileInfo, err := lrwfp.localFile.Stat()
 		if err != nil {
-			logwarn("stat failed on staging file", Fields{Operation: Stat, Path: file.AbsolutePath(), Error: err})
+			logwarn("stat failed on staging file", Fields{Operation: GetattrFile, Path: file.AbsolutePath(), Error: err})
 			return err
 		}
 		// update the local cache
@@ -66,7 +73,7 @@ func (file *FileINode) Attr(ctx context.Context, a *fuse.Attr) error {
 		file.Attrs.Mtime = fileInfo.ModTime()
 	} else {
 		if file.FileSystem.Clock.Now().After(file.Attrs.Expires) {
-			err := file.Parent.LookupAttrs(file.Attrs.Name, &file.Attrs)
+			_, err := file.Parent.statInodeInHopsFS(GetattrFile, file.Attrs.Name, &file.Attrs)
 			if err != nil {
 				return err
 			}
@@ -165,6 +172,7 @@ func (file *FileINode) Fsync(ctx context.Context, req *fuse.FsyncRequest) error 
 
 // Invalidates metadata cache, so next ls or stat gives up-to-date file attributes
 func (file *FileINode) InvalidateMetadataCache() {
+	logdebug("InvalidateMetadataCache ", file.logInfo(Fields{}))
 	file.Attrs.Expires = file.FileSystem.Clock.Now().Add(-1 * time.Second)
 }
 

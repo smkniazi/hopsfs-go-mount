@@ -39,12 +39,6 @@ var _ fs.NodeFsyncer = (*FileINode)(nil)
 var _ fs.NodeSetattrer = (*FileINode)(nil)
 var _ fs.NodeForgetter = (*FileINode)(nil)
 
-func (file *FileINode) Forget() {
-	// ask parent to remove me from the children list
-	logdebug(fmt.Sprintf("Forget for file %s", file.Attrs.Name), nil)
-	file.Parent.removeChildInode(Forget, file.Attrs.Name)
-}
-
 // File is also a factory for ReadSeekCloser objects
 var _ ReadSeekCloserFactory = (*FileINode)(nil)
 
@@ -216,6 +210,15 @@ func (file *FileINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, re
 	}
 
 	return nil
+}
+
+// Responds on FUSE request to forget inode
+func (file *FileINode) Forget() {
+	file.lockFile()
+	defer file.unlockFile()
+	// ask parent to remove me from the children list
+	logdebug(fmt.Sprintf("Forget for file %s", file.Attrs.Name), nil)
+	file.Parent.removeChildInode(Forget, file.Attrs.Name)
 }
 
 func (file *FileINode) countActiveHandles() int {

@@ -18,11 +18,12 @@ import (
 
 // Encapsulates state and operations for directory node on the HDFS file system
 type DirINode struct {
-	FileSystem *FileSystem         // Pointer to the owning filesystem
-	Attrs      Attrs               // Cached attributes of the directory, TODO: add TTL
-	Parent     *DirINode           // Pointer to the parent directory (allows computing fully-qualified paths on demand)
-	Children   map[string]*fs.Node // Cahed directory entries
-	mutex      sync.Mutex          // One read or write operation on a directory at a time
+	FileSystem    *FileSystem         // Pointer to the owning filesystem
+	Attrs         Attrs               // Cached attributes of the directory, TODO: add TTL
+	Parent        *DirINode           // Pointer to the parent directory (allows computing fully-qualified paths on demand)
+	children      map[string]*fs.Node // Cahed directory entries
+	childrenMutex sync.Mutex          // for concurrent read and updates
+	dirMutex      sync.Mutex          // One read or write operation on a directory at a time
 }
 
 // Verify that *Dir implements necesary FUSE interfaces
@@ -33,12 +34,6 @@ var _ fs.NodeMkdirer = (*DirINode)(nil)
 var _ fs.NodeRemover = (*DirINode)(nil)
 var _ fs.NodeRenamer = (*DirINode)(nil)
 var _ fs.NodeForgetter = (*DirINode)(nil)
-
-func (dir *DirINode) Forget() {
-	// ask parent to remove me from the children list
-	logdebug(fmt.Sprintf("Forget for dir %s", dir.Attrs.Name), nil)
-	dir.Parent.removeChildInode(Forget, dir.Attrs.Name)
-}
 
 // Returns absolute path of the dir in HDFS namespace
 func (dir *DirINode) AbsolutePath() string {
@@ -76,33 +71,39 @@ func (dir *DirINode) Attr(ctx context.Context, a *fuse.Attr) error {
 }
 
 func (dir *DirINode) getChildInode(operation, name string) *fs.Node {
-	if dir.Children == nil {
-		dir.Children = make(map[string]*fs.Node)
+	dir.lockChildrenMutex()
+	defer dir.unlockChildrenMutex()
+
+	if dir.children == nil {
+		dir.children = make(map[string]*fs.Node)
 		return nil
 	}
 
-	node := dir.Children[name]
+	node := dir.children[name]
 	if node != nil {
-		logdebug("Children's List. getChildInode ", Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.Children)})
+		logdebug("Children's List. getChildInode ", Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.children)})
 	} else {
-		logdebug("Children's List. getChildInode. Not Found  ", Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.Children)})
+		logdebug("Children's List. getChildInode. Not Found  ", Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.children)})
 	}
 
 	return node
 }
 
 func (dir *DirINode) addOrUpdateChildInodeAttrs(operation, name string, attrs Attrs) *fs.Node {
-	if dir.Children == nil {
-		dir.Children = make(map[string]*fs.Node)
+	dir.lockChildrenMutex()
+	defer dir.unlockChildrenMutex()
+
+	if dir.children == nil {
+		dir.children = make(map[string]*fs.Node)
 	}
 
-	if node, ok := dir.Children[name]; ok {
+	if node, ok := dir.children[name]; ok {
 		if fnode, ok := (*node).(*FileINode); ok {
 			fnode.Attrs = attrs
 		} else if dnode, ok := (*node).(*DirINode); ok {
 			dnode.Attrs = attrs
 		}
-		logdebug("Children's List. addOrUpdateChildInodeAttrs. Update ", Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.Children)})
+		logdebug("Children's List. addOrUpdateChildInodeAttrs. Update ", Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.children)})
 		return node
 	} else {
 		var node fs.Node
@@ -111,16 +112,19 @@ func (dir *DirINode) addOrUpdateChildInodeAttrs(operation, name string, attrs At
 		} else {
 			node = &DirINode{FileSystem: dir.FileSystem, Parent: dir, Attrs: attrs}
 		}
-		dir.Children[name] = &node
-		logdebug("Children's List. addOrUpdateChildInodeAttrs. Add ", Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.Children)})
+		dir.children[name] = &node
+		logdebug("Children's List. addOrUpdateChildInodeAttrs. Add ", Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.children)})
 		return &node
 	}
 }
 
 func (dir *DirINode) removeChildInode(operation, name string) {
-	if dir.Children != nil {
-		delete(dir.Children, name)
-		logdebug("Children's List. removeChildInode ", Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.Children)})
+	dir.lockChildrenMutex()
+	defer dir.unlockChildrenMutex()
+
+	if dir.children != nil {
+		delete(dir.children, name)
+		logdebug("Children's List. removeChildInode ", Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.children)})
 	}
 }
 
@@ -328,10 +332,27 @@ func (dir *DirINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp
 	return nil
 }
 
+// Responds on FUSE request to forget inode
+func (dir *DirINode) Forget() {
+	dir.lockMutex()
+	defer dir.unlockMutex()
+	// ask parent to remove me from the children list
+	logdebug(fmt.Sprintf("Forget for dir %s", dir.Attrs.Name), nil)
+	dir.Parent.removeChildInode(Forget, dir.Attrs.Name)
+}
+
 func (dir *DirINode) lockMutex() {
-	dir.mutex.Lock()
+	dir.dirMutex.Lock()
 }
 
 func (dir *DirINode) unlockMutex() {
-	dir.mutex.Unlock()
+	dir.dirMutex.Unlock()
+}
+
+func (dir *DirINode) lockChildrenMutex() {
+	dir.childrenMutex.Lock()
+}
+
+func (dir *DirINode) unlockChildrenMutex() {
+	dir.childrenMutex.Unlock()
 }

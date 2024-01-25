@@ -4,6 +4,8 @@
 package main
 
 import (
+	"syscall"
+
 	"bazil.org/fuse"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
@@ -20,7 +22,7 @@ func TestAttributeCaching(t *testing.T) {
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
 	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"*"}, false, NewDefaultRetryPolicy(mockClock), mockClock)
 	root, _ := fs.Root()
-	hdfsAccessor.EXPECT().Stat("/testDir").Return(Attrs{Name: "testDir", Mode: os.ModeDir | 0757}, nil)
+	hdfsAccessor.EXPECT().Stat("/testDir").Return(Attrs{Name: "testDir", Mode: os.ModeDir | 0757, Expires: fs.Clock.Now().Add(STAT_CACHE_TIME)}, nil)
 	dir, err := root.(*DirINode).Lookup(nil, "testDir")
 	assert.Nil(t, err)
 	// Second call to Lookup(), shouldn't re-issue Stat() on backend
@@ -104,7 +106,7 @@ func TestLookupWithFiltering(t *testing.T) {
 	_, err := root.(*DirINode).Lookup(nil, "foo")
 	assert.Nil(t, err)
 	_, err = root.(*DirINode).Lookup(nil, "qux")
-	assert.Equal(t, fuse.ENOENT, err) // Not found error, since it is not in the allowed prefixes
+	assert.Equal(t, syscall.ENOENT, err) // Not found error, since it is not in the allowed prefixes
 }
 
 // Testing Mkdir

@@ -40,6 +40,7 @@ const (
 	Fsync          = "fsync"
 	Flush          = "flush"
 	Close          = "close"
+	Poll           = "poll"
 	// Stat              = "stat"
 	GetattrDir        = "getattr_dir.go"
 	GetattrFile       = "getattr_file.go"

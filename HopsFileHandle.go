@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"syscall"
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
@@ -29,6 +30,7 @@ var _ fs.HandleReleaser = (*FileHandle)(nil)
 var _ fs.HandleWriter = (*FileHandle)(nil)
 var _ fs.NodeFsyncer = (*FileHandle)(nil)
 var _ fs.HandleFlusher = (*FileHandle)(nil)
+var _ fs.HandlePoller = (*FileHandle)(nil)
 
 func (fh *FileHandle) dataChanged() bool {
 	if fh.totalBytesWritten > 0 {
@@ -235,6 +237,11 @@ func (fh *FileHandle) Release(_ context.Context, _ *fuse.ReleaseRequest) error {
 
 	loginfo("Closed file handle ", fh.logInfo(Fields{Operation: Close, Flags: fh.fileFlags, TotalBytesRead: fh.tatalBytesRead, TotalBytesWritten: fh.totalBytesWritten}))
 	return nil
+}
+
+func (fh *FileHandle) Poll(ctx context.Context, req *fuse.PollRequest, resp *fuse.PollResponse) error {
+	logwarn("Polling is not supported ", fh.logInfo(Fields{Operation: Poll}))
+	return syscall.ENOSYS
 }
 
 func (fh *FileHandle) logInfo(fields Fields) Fields {

@@ -17,6 +17,7 @@ import (
 
 	"bazil.org/fuse/fs/fstestutil"
 	"github.com/colinmarc/hdfs/v2"
+	"golang.org/x/sys/unix"
 	"logicalclocks.com/hopsfs-mount/ugcache"
 )
 
@@ -421,7 +422,7 @@ func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor
 	// Wrapping with FaultTolerantHdfsAccessor
 	retryPolicy := NewDefaultRetryPolicy(WallClock{})
 	retryPolicy.MaxAttempts = 1 // for quick failure
-	initLogger("info", false, "")
+	initLogger("WARN", false, "")
 	hdfsAccessor, _ := NewHdfsAccessor("localhost:8020", WallClock{}, TLSConfig{TLS: false, RootCABundle: rootCABundle, ClientCertificate: clientCertificate, ClientKey: clientKey})
 	err := hdfsAccessor.EnsureConnected()
 	if err != nil {
@@ -444,6 +445,10 @@ func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor
 	}
 	defer mnt.Close()
 	loginfo(fmt.Sprintf("Connected to HopsFS. Mount point is %s", mnt.Dir), nil)
+
+	// create a dummy file
+	pollFile(fmt.Sprintf("%s/__file_to_diable_polling__", mnt.Dir))
+
 	fn(mnt.Dir, hdfsAccessor)
 }
 
@@ -509,4 +514,52 @@ func rmDir(t testing.TB, dir string) error {
 	}
 
 	return nil
+}
+
+func pollFile(filePath string) {
+	// Open the file in read mode
+	file, err := os.Create(filePath)
+	if err != nil {
+		fmt.Println("Error opening file:", err)
+		return
+	}
+	defer os.Remove(filePath)
+	defer file.Close()
+
+	// Get the file descriptor
+	fd := int(file.Fd())
+
+	// Create an epoll instance
+	epollFd, err := unix.EpollCreate1(0)
+	if err != nil {
+		fmt.Println("Error creating epoll instance:", err)
+		return
+	}
+	defer unix.Close(epollFd)
+
+	// Add the file descriptor to the epoll instance
+	event := unix.EpollEvent{
+		Events: unix.EPOLLIN,
+		Fd:     int32(fd),
+	}
+	if err := unix.EpollCtl(epollFd, unix.EPOLL_CTL_ADD, fd, &event); err != nil {
+		fmt.Println("Error adding file descriptor to epoll:", err)
+		return
+	}
+
+	fmt.Printf("Polling file %s...\n", filePath)
+
+	// Poll the file handle
+	events := make([]unix.EpollEvent, 1)
+	n, err := unix.EpollWait(epollFd, events, 1000) // 1000 milliseconds timeout
+	if err != nil {
+		fmt.Println("Error waiting for events:", err)
+		return
+	}
+
+	if n > 0 {
+		// File is ready for reading
+		fmt.Println("File is ready for polling.")
+	}
+
 }

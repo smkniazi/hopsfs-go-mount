@@ -147,7 +147,7 @@ func TestFlushFile(t *testing.T) {
 
 	// Test for newfilehandlewriter with existing file
 	root, _ := fs.Root()
-	file := (*root.(*DirINode).addOrUpdateChildInodeAttrs("unit_test", "testWriteFile_2", Attrs{Name: "testWriteFile_2", Mode: os.FileMode(0757)})).(*FileINode)
+	file := (root.(*DirINode).addOrUpdateChildInodeAttrs("unit_test", "testWriteFile_2", Attrs{Name: "testWriteFile_2", Mode: os.FileMode(0757)})).(*FileINode)
 	fh, _ := file.Open(nil, &fuse.OpenRequest{}, &fuse.OpenResponse{})
 	fileHandle := fh.(*FileHandle)
 

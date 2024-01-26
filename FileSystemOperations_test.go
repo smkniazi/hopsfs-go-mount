@@ -422,7 +422,7 @@ func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor
 	// Wrapping with FaultTolerantHdfsAccessor
 	retryPolicy := NewDefaultRetryPolicy(WallClock{})
 	retryPolicy.MaxAttempts = 1 // for quick failure
-	initLogger("WARN", false, "")
+	initLogger("INFO", false, "")
 	hdfsAccessor, _ := NewHdfsAccessor("localhost:8020", WallClock{}, TLSConfig{TLS: false, RootCABundle: rootCABundle, ClientCertificate: clientCertificate, ClientKey: clientKey})
 	err := hdfsAccessor.EnsureConnected()
 	if err != nil {
@@ -446,8 +446,8 @@ func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor
 	defer mnt.Close()
 	loginfo(fmt.Sprintf("Connected to HopsFS. Mount point is %s", mnt.Dir), nil)
 
-	// create a dummy file
-	pollFile(fmt.Sprintf("%s/__file_to_diable_polling__", mnt.Dir))
+	//disable polling
+	disablePolling(mnt.Dir)
 
 	fn(mnt.Dir, hdfsAccessor)
 }
@@ -516,23 +516,32 @@ func rmDir(t testing.TB, dir string) error {
 	return nil
 }
 
-func pollFile(filePath string) {
-	// Open the file in read mode
+// https://github.com/bazil/fuse/issues/264
+// https://github.com/hanwen/go-fuse/commit/4f10e248ebabd3cdf9c0aa3ae58fd15235f82a79#comments
+// Only needed in unit tests
+// Open a file and poll it once
+// In unit test we send a poll request as soon as the
+// mount point is started. The poll request will
+// retun syscall.ENOSYS telling the kernel that the
+// file system does not support polling and there is no
+// need to send furter polling request.
+// See HOPSFS-5 for more details
+func disablePolling(rootDir string) {
+
+	filePath := fmt.Sprintf("%s/__file_to_diable_polling__", rootDir)
 	file, err := os.Create(filePath)
 	if err != nil {
-		fmt.Println("Error opening file:", err)
+		logerror(fmt.Sprintf("Error opening file: %v", err), nil)
 		return
 	}
 	defer os.Remove(filePath)
 	defer file.Close()
 
-	// Get the file descriptor
-	fd := int(file.Fd())
-
 	// Create an epoll instance
+	fd := int(file.Fd())
 	epollFd, err := unix.EpollCreate1(0)
 	if err != nil {
-		fmt.Println("Error creating epoll instance:", err)
+		logerror(fmt.Sprintf("Error creating epoll instance: %v", err), nil)
 		return
 	}
 	defer unix.Close(epollFd)
@@ -543,23 +552,22 @@ func pollFile(filePath string) {
 		Fd:     int32(fd),
 	}
 	if err := unix.EpollCtl(epollFd, unix.EPOLL_CTL_ADD, fd, &event); err != nil {
-		fmt.Println("Error adding file descriptor to epoll:", err)
+		logerror(fmt.Sprintf("Error adding file descriptor to epoll: %v", err), nil)
 		return
 	}
 
 	fmt.Printf("Polling file %s...\n", filePath)
 
-	// Poll the file handle
 	events := make([]unix.EpollEvent, 1)
-	n, err := unix.EpollWait(epollFd, events, 1000) // 1000 milliseconds timeout
+	n, err := unix.EpollWait(epollFd, events, 1000)
 	if err != nil {
-		fmt.Println("Error waiting for events:", err)
+		logerror(fmt.Sprintf("Error waiting for events: %v", err), nil)
 		return
 	}
 
 	if n > 0 {
 		// File is ready for reading
-		fmt.Println("File is ready for polling.")
+		logdebug("File is ready for polling.", nil)
 	}
 
 }

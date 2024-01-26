@@ -18,12 +18,12 @@ import (
 
 // Encapsulates state and operations for directory node on the HDFS file system
 type DirINode struct {
-	FileSystem    *FileSystem         // Pointer to the owning filesystem
-	Attrs         Attrs               // Cached attributes of the directory, TODO: add TTL
-	Parent        *DirINode           // Pointer to the parent directory (allows computing fully-qualified paths on demand)
-	children      map[string]*fs.Node // Cahed directory entries
-	childrenMutex sync.Mutex          // for concurrent read and updates
-	dirMutex      sync.Mutex          // One read or write operation on a directory at a time
+	FileSystem    *FileSystem        // Pointer to the owning filesystem
+	Attrs         Attrs              // Cached attributes of the directory, TODO: add TTL
+	Parent        *DirINode          // Pointer to the parent directory (allows computing fully-qualified paths on demand)
+	children      map[string]fs.Node // Cahed directory entries
+	childrenMutex sync.Mutex         // for concurrent read and updates
+	dirMutex      sync.Mutex         // One read or write operation on a directory at a time
 }
 
 // Verify that *Dir implements necesary FUSE interfaces
@@ -70,12 +70,12 @@ func (dir *DirINode) Attr(ctx context.Context, a *fuse.Attr) error {
 	return dir.Attrs.ConvertAttrToFuse(a)
 }
 
-func (dir *DirINode) getChildInode(operation, name string) *fs.Node {
+func (dir *DirINode) getChildInode(operation, name string) fs.Node {
 	dir.lockChildrenMutex()
 	defer dir.unlockChildrenMutex()
 
 	if dir.children == nil {
-		dir.children = make(map[string]*fs.Node)
+		dir.children = make(map[string]fs.Node)
 		return nil
 	}
 
@@ -89,18 +89,18 @@ func (dir *DirINode) getChildInode(operation, name string) *fs.Node {
 	return node
 }
 
-func (dir *DirINode) addOrUpdateChildInodeAttrs(operation, name string, attrs Attrs) *fs.Node {
+func (dir *DirINode) addOrUpdateChildInodeAttrs(operation, name string, attrs Attrs) fs.Node {
 	dir.lockChildrenMutex()
 	defer dir.unlockChildrenMutex()
 
 	if dir.children == nil {
-		dir.children = make(map[string]*fs.Node)
+		dir.children = make(map[string]fs.Node)
 	}
 
 	if node, ok := dir.children[name]; ok {
-		if fnode, ok := (*node).(*FileINode); ok {
+		if fnode, ok := (node).(*FileINode); ok {
 			fnode.Attrs = attrs
-		} else if dnode, ok := (*node).(*DirINode); ok {
+		} else if dnode, ok := (node).(*DirINode); ok {
 			dnode.Attrs = attrs
 		}
 		logdebug("Children's List. addOrUpdateChildInodeAttrs. Update ", Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.children)})
@@ -112,9 +112,9 @@ func (dir *DirINode) addOrUpdateChildInodeAttrs(operation, name string, attrs At
 		} else {
 			node = &DirINode{FileSystem: dir.FileSystem, Parent: dir, Attrs: attrs}
 		}
-		dir.children[name] = &node
+		dir.children[name] = node
 		logdebug("Children's List. addOrUpdateChildInodeAttrs. Add ", Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.children)})
-		return &node
+		return node
 	}
 }
 
@@ -138,7 +138,7 @@ func (dir *DirINode) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	}
 
 	if node := dir.getChildInode(Lookup, name); node != nil {
-		return *node, nil
+		return node, nil
 	}
 
 	var attrs Attrs
@@ -146,7 +146,7 @@ func (dir *DirINode) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	return *node, nil
+	return node, nil
 }
 
 // Responds on FUSE request to read directory
@@ -181,7 +181,7 @@ func (dir *DirINode) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 }
 
 // Performs Stat() query on the backend
-func (dir *DirINode) statInodeInHopsFS(operation, name string, attrs *Attrs) (*fs.Node, error) {
+func (dir *DirINode) statInodeInHopsFS(operation, name string, attrs *Attrs) (fs.Node, error) {
 
 	a, err := dir.FileSystem.getDFSConnector().Stat(path.Join(dir.AbsolutePath(), name))
 	if err != nil {
@@ -219,7 +219,7 @@ func (dir *DirINode) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node
 	}
 
 	newInode := dir.addOrUpdateChildInodeAttrs(Mkdir, req.Name, Attrs{Name: req.Name, Mode: req.Mode | os.ModeDir, Uid: req.Uid, Gid: req.Gid})
-	return *newInode, nil
+	return newInode, nil
 }
 
 // Responds on FUSE Create request
@@ -228,7 +228,7 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 	defer dir.unlockMutex()
 
 	loginfo("Creating a new file", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags})
-	file := (*dir.addOrUpdateChildInodeAttrs(Create, req.Name, Attrs{Name: req.Name, Mode: req.Mode})).(*FileINode)
+	file := (dir.addOrUpdateChildInodeAttrs(Create, req.Name, Attrs{Name: req.Name, Mode: req.Mode})).(*FileINode)
 	handle, err := file.NewFileHandle(false, req.Flags)
 	if err != nil {
 		logerror("File creation failed", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags, Error: err})
@@ -285,11 +285,11 @@ func (dir *DirINode) Rename(ctx context.Context, req *fuse.RenameRequest, newDir
 	if err == nil {
 		// Upon successful rename, updating in-memory representation of the file entry
 		if node := dir.getChildInode(Rename, req.OldName); node != nil {
-			if fnode, ok := (*node).(*FileINode); ok {
+			if fnode, ok := (node).(*FileINode); ok {
 				fnode.Attrs.Name = req.NewName
 				fnode.Parent = newDir.(*DirINode)
 				newDir.(*DirINode).addOrUpdateChildInodeAttrs(Rename, req.NewName, fnode.Attrs)
-			} else if dnode, ok := (*node).(*DirINode); ok {
+			} else if dnode, ok := (node).(*DirINode); ok {
 				dnode.Attrs.Name = req.NewName
 				dnode.Parent = newDir.(*DirINode)
 				newDir.(*DirINode).addOrUpdateChildInodeAttrs(Rename, req.NewName, dnode.Attrs)

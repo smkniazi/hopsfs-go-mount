@@ -47,7 +47,7 @@ type TLSConfig struct {
 	ClientKey         string
 }
 
-type hdfsAccessorImpl struct {
+type HdfsAccessorImpl struct {
 	Clock               Clock        // interface to get wall clock time
 	NameNodeAddresses   []string     // array of Address:port string for the name nodes
 	MetadataClient      *hdfs.Client // HDFS client used for metadata operations
@@ -55,22 +55,22 @@ type hdfsAccessorImpl struct {
 	TLSConfig           TLSConfig    // enable/disable using tls
 }
 
-var _ HdfsAccessor = (*hdfsAccessorImpl)(nil) // ensure hdfsAccessorImpl implements HdfsAccessor
+var _ HdfsAccessor = (*HdfsAccessorImpl)(nil) // ensure hdfsAccessorImpl implements HdfsAccessor
 
 // Creates an instance of HdfsAccessor
 func NewHdfsAccessor(nameNodeAddresses string, clock Clock, tlsConfig TLSConfig) (HdfsAccessor, error) {
 	nns := strings.Split(nameNodeAddresses, ",")
 
-	this := &hdfsAccessorImpl{
+	hdfsAccessorImpl := &HdfsAccessorImpl{
 		NameNodeAddresses: nns,
 		Clock:             clock,
 		TLSConfig:         tlsConfig,
 	}
-	return this, nil
+	return hdfsAccessorImpl, nil
 }
 
 // Ensures that metadata client is connected
-func (dfs *hdfsAccessorImpl) EnsureConnected() error {
+func (dfs *HdfsAccessorImpl) EnsureConnected() error {
 	if dfs.MetadataClient != nil {
 		return nil
 	}
@@ -78,7 +78,7 @@ func (dfs *hdfsAccessorImpl) EnsureConnected() error {
 }
 
 // Establishes connection to the name node (assigns MetadataClient field)
-func (dfs *hdfsAccessorImpl) ConnectMetadataClient() error {
+func (dfs *HdfsAccessorImpl) ConnectMetadataClient() error {
 	client, err := dfs.ConnectToNameNode()
 	if err != nil {
 		return err
@@ -88,7 +88,7 @@ func (dfs *hdfsAccessorImpl) ConnectMetadataClient() error {
 }
 
 // Establishes connection to a name node in the context of some other operation
-func (dfs *hdfsAccessorImpl) ConnectToNameNode() (*hdfs.Client, error) {
+func (dfs *HdfsAccessorImpl) ConnectToNameNode() (*hdfs.Client, error) {
 	// connecting to HDFS name node
 	client, err := dfs.connectToNameNodeImpl()
 	if err != nil {
@@ -99,7 +99,7 @@ func (dfs *hdfsAccessorImpl) ConnectToNameNode() (*hdfs.Client, error) {
 }
 
 // Performs an attempt to connect to the HDFS name
-func (dfs *hdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
+func (dfs *HdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 	if forceOverrideUsername != "" {
 		hadoopUserName = forceOverrideUsername
 		// if it exists we can look it up, otherwise it will always be 0
@@ -157,7 +157,7 @@ func (dfs *hdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 }
 
 // Opens HDFS file for reading
-func (dfs *hdfsAccessorImpl) OpenRead(path string) (ReadSeekCloser, error) {
+func (dfs *HdfsAccessorImpl) OpenRead(path string) (ReadSeekCloser, error) {
 	// Blocking read. This is to reduce the connections pressue on hadoop-name-node
 	dfs.lockHadoopClient()
 	defer dfs.unlockHadoopClient()
@@ -175,7 +175,7 @@ func (dfs *hdfsAccessorImpl) OpenRead(path string) (ReadSeekCloser, error) {
 }
 
 // Creates new HDFS file
-func (dfs *hdfsAccessorImpl) CreateFile(path string, mode os.FileMode, overwrite bool) (HdfsWriter, error) {
+func (dfs *HdfsAccessorImpl) CreateFile(path string, mode os.FileMode, overwrite bool) (HdfsWriter, error) {
 	dfs.lockHadoopClient()
 	defer dfs.unlockHadoopClient()
 
@@ -199,7 +199,7 @@ func (dfs *hdfsAccessorImpl) CreateFile(path string, mode os.FileMode, overwrite
 }
 
 // Enumerates HDFS directory
-func (dfs *hdfsAccessorImpl) ReadDir(path string) ([]Attrs, error) {
+func (dfs *HdfsAccessorImpl) ReadDir(path string) ([]Attrs, error) {
 	dfs.lockHadoopClient()
 	defer dfs.unlockHadoopClient()
 
@@ -227,7 +227,7 @@ func (dfs *hdfsAccessorImpl) ReadDir(path string) ([]Attrs, error) {
 }
 
 // Retrieves file/directory attributes
-func (dfs *hdfsAccessorImpl) Stat(path string) (Attrs, error) {
+func (dfs *HdfsAccessorImpl) Stat(path string) (Attrs, error) {
 	dfs.lockHadoopClient()
 	defer dfs.unlockHadoopClient()
 
@@ -252,7 +252,7 @@ func (dfs *hdfsAccessorImpl) Stat(path string) (Attrs, error) {
 }
 
 // Retrieves HDFS usages
-func (dfs *hdfsAccessorImpl) StatFs() (FsInfo, error) {
+func (dfs *HdfsAccessorImpl) StatFs() (FsInfo, error) {
 	dfs.lockHadoopClient()
 	defer dfs.unlockHadoopClient()
 
@@ -275,7 +275,7 @@ func (dfs *hdfsAccessorImpl) StatFs() (FsInfo, error) {
 }
 
 // Converts os.FileInfo + underlying proto-buf data into Attrs structure
-func (dfs *hdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
+func (dfs *HdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 	// protoBufDatr := fileInfo.Sys().(*hadoop_hdfs.HdfsFileStatusProto)
 	fi := fileInfo.(*hdfs.FileInfo)
 	mode := os.FileMode(fi.Permission())
@@ -312,7 +312,7 @@ func (dfs *hdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 	}
 }
 
-func (dfs *hdfsAccessorImpl) AttrsFromFsInfo(fsInfo hdfs.FsInfo) FsInfo {
+func (dfs *HdfsAccessorImpl) AttrsFromFsInfo(fsInfo hdfs.FsInfo) FsInfo {
 	return FsInfo{
 		capacity:  fsInfo.Capacity,
 		used:      fsInfo.Used,
@@ -375,7 +375,7 @@ func isNonRetriableError(err error) bool {
 }
 
 // Creates a directory
-func (dfs *hdfsAccessorImpl) Mkdir(path string, mode os.FileMode) error {
+func (dfs *HdfsAccessorImpl) Mkdir(path string, mode os.FileMode) error {
 	dfs.lockHadoopClient()
 	defer dfs.unlockHadoopClient()
 
@@ -394,7 +394,7 @@ func (dfs *hdfsAccessorImpl) Mkdir(path string, mode os.FileMode) error {
 }
 
 // Removes file or directory
-func (dfs *hdfsAccessorImpl) Remove(path string) error {
+func (dfs *HdfsAccessorImpl) Remove(path string) error {
 	dfs.lockHadoopClient()
 	defer dfs.unlockHadoopClient()
 
@@ -407,7 +407,7 @@ func (dfs *hdfsAccessorImpl) Remove(path string) error {
 }
 
 // Renames file or directory
-func (dfs *hdfsAccessorImpl) Rename(oldPath string, newPath string) error {
+func (dfs *HdfsAccessorImpl) Rename(oldPath string, newPath string) error {
 	dfs.lockHadoopClient()
 	defer dfs.unlockHadoopClient()
 
@@ -420,7 +420,7 @@ func (dfs *hdfsAccessorImpl) Rename(oldPath string, newPath string) error {
 }
 
 // Changes the mode of the file
-func (dfs *hdfsAccessorImpl) Chmod(path string, mode os.FileMode) error {
+func (dfs *HdfsAccessorImpl) Chmod(path string, mode os.FileMode) error {
 	dfs.lockHadoopClient()
 	defer dfs.unlockHadoopClient()
 
@@ -433,7 +433,7 @@ func (dfs *hdfsAccessorImpl) Chmod(path string, mode os.FileMode) error {
 }
 
 // Changes the owner and group of the file
-func (dfs *hdfsAccessorImpl) Chown(path string, user, group string) error {
+func (dfs *HdfsAccessorImpl) Chown(path string, user, group string) error {
 	dfs.lockHadoopClient()
 	defer dfs.unlockHadoopClient()
 
@@ -446,7 +446,7 @@ func (dfs *hdfsAccessorImpl) Chown(path string, user, group string) error {
 }
 
 // Close current connection if needed
-func (dfs *hdfsAccessorImpl) Close() error {
+func (dfs *HdfsAccessorImpl) Close() error {
 	dfs.lockHadoopClient()
 	defer dfs.unlockHadoopClient()
 
@@ -458,10 +458,10 @@ func (dfs *hdfsAccessorImpl) Close() error {
 	return nil
 }
 
-func (dfs *hdfsAccessorImpl) lockHadoopClient() {
+func (dfs *HdfsAccessorImpl) lockHadoopClient() {
 	dfs.MetadataClientMutex.Lock()
 }
 
-func (dfs *hdfsAccessorImpl) unlockHadoopClient() {
+func (dfs *HdfsAccessorImpl) unlockHadoopClient() {
 	dfs.MetadataClientMutex.Unlock()
 }

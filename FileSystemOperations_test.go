@@ -277,6 +277,7 @@ func seekTest(t *testing.T, dataSize int, diskSeekTestFile string, dfsSeekTestFi
 
 func prepare(t *testing.T, client *hdfs.Client, dataSize int, diskTestFile string, dfsTestFile string) {
 
+	loginfo("Creating test data ...", nil)
 	recreateDFSFile := false
 	if _, err := os.Stat(diskTestFile); errors.Is(err, os.ErrNotExist) {
 		testFile, err := os.Create(diskTestFile)

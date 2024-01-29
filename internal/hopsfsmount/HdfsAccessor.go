@@ -75,26 +75,27 @@ func (dfs *HdfsAccessorImpl) EnsureConnected() error {
 	if dfs.MetadataClient != nil {
 		return nil
 	}
-	return dfs.ConnectMetadataClient()
+	return dfs.connectMetadataClient()
 }
 
 // Establishes connection to the name node (assigns MetadataClient field)
-func (dfs *HdfsAccessorImpl) ConnectMetadataClient() error {
-	client, err := dfs.ConnectToNameNode()
+func (dfs *HdfsAccessorImpl) connectMetadataClient() error {
+	client, err := dfs.connectToNameNode()
 	if err != nil {
-		return err
+		return unwrapAndTranslateError(err)
 	}
 	dfs.MetadataClient = client
 	return nil
 }
 
 // Establishes connection to a name node in the context of some other operation
-func (dfs *HdfsAccessorImpl) ConnectToNameNode() (*hdfs.Client, error) {
+func (dfs *HdfsAccessorImpl) connectToNameNode() (*hdfs.Client, error) {
 	// connecting to HDFS name node
 	client, err := dfs.connectToNameNodeImpl()
 	if err != nil {
 		// Connection failed
-		return nil, fmt.Errorf("fail to connect to name node with error: %s", err.Error())
+		logger.Error(fmt.Sprintf("fail to connect to name node with error: %s", err.Error()), nil)
+		return nil, syscall.EIO
 	}
 	return client, nil
 }
@@ -164,8 +165,8 @@ func (dfs *HdfsAccessorImpl) OpenRead(path string) (ReadSeekCloser, error) {
 	defer dfs.unlockHadoopClient()
 
 	if dfs.MetadataClient == nil {
-		if err := dfs.ConnectMetadataClient(); err != nil {
-			return nil, err
+		if err := dfs.connectMetadataClient(); err != nil {
+			return nil, unwrapAndTranslateError(err)
 		}
 	}
 	reader, err := dfs.MetadataClient.Open(path)
@@ -181,8 +182,8 @@ func (dfs *HdfsAccessorImpl) CreateFile(path string, mode os.FileMode, overwrite
 	defer dfs.unlockHadoopClient()
 
 	if dfs.MetadataClient == nil {
-		if err := dfs.ConnectMetadataClient(); err != nil {
-			return nil, err
+		if err := dfs.connectMetadataClient(); err != nil {
+			return nil, unwrapAndTranslateError(err)
 		}
 	}
 
@@ -205,8 +206,8 @@ func (dfs *HdfsAccessorImpl) ReadDir(path string) ([]Attrs, error) {
 	defer dfs.unlockHadoopClient()
 
 	if dfs.MetadataClient == nil {
-		if err := dfs.ConnectMetadataClient(); err != nil {
-			return nil, err
+		if err := dfs.connectMetadataClient(); err != nil {
+			return nil, unwrapAndTranslateError(err)
 		}
 	}
 	files, err := dfs.MetadataClient.ReadDir(path)
@@ -222,7 +223,7 @@ func (dfs *HdfsAccessorImpl) ReadDir(path string) ([]Attrs, error) {
 	}
 	allAttrs := make([]Attrs, len(files))
 	for i, fileInfo := range files {
-		allAttrs[i] = dfs.AttrsFromFileInfo(fileInfo)
+		allAttrs[i] = dfs.attrsFromFileInfo(fileInfo)
 	}
 	return allAttrs, nil
 }
@@ -233,8 +234,8 @@ func (dfs *HdfsAccessorImpl) Stat(path string) (Attrs, error) {
 	defer dfs.unlockHadoopClient()
 
 	if dfs.MetadataClient == nil {
-		if err := dfs.ConnectMetadataClient(); err != nil {
-			return Attrs{}, err
+		if err := dfs.connectMetadataClient(); err != nil {
+			return Attrs{}, unwrapAndTranslateError(err)
 		}
 	}
 
@@ -249,7 +250,7 @@ func (dfs *HdfsAccessorImpl) Stat(path string) (Attrs, error) {
 		dfs.MetadataClient = nil
 		return Attrs{}, unwrapAndTranslateError(err)
 	}
-	return dfs.AttrsFromFileInfo(fileInfo), nil
+	return dfs.attrsFromFileInfo(fileInfo), nil
 }
 
 // Retrieves HDFS usages
@@ -258,8 +259,8 @@ func (dfs *HdfsAccessorImpl) StatFs() (FsInfo, error) {
 	defer dfs.unlockHadoopClient()
 
 	if dfs.MetadataClient == nil {
-		if err := dfs.ConnectMetadataClient(); err != nil {
-			return FsInfo{}, err
+		if err := dfs.connectMetadataClient(); err != nil {
+			return FsInfo{}, unwrapAndTranslateError(err)
 		}
 	}
 
@@ -276,7 +277,7 @@ func (dfs *HdfsAccessorImpl) StatFs() (FsInfo, error) {
 }
 
 // Converts os.FileInfo + underlying proto-buf data into Attrs structure
-func (dfs *HdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
+func (dfs *HdfsAccessorImpl) attrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 	// protoBufDatr := fileInfo.Sys().(*hadoop_hdfs.HdfsFileStatusProto)
 	fi := fileInfo.(*hdfs.FileInfo)
 	mode := os.FileMode(fi.Permission())
@@ -334,25 +335,45 @@ func IsSuccessOrNonRetriableError(err error) bool {
 }
 
 func unwrapAndTranslateError(err error) error {
-	var e error
-	pathError, ok := err.(*os.PathError)
-	if ok {
+
+	if _, ok := err.(syscall.Errno); ok {
+		return err
+	}
+
+	if _, ok := err.(*syscall.Errno); ok {
+		return err
+	}
+
+	e := err
+	if pathError, ok := err.(*os.PathError); ok {
 		e = pathError.Err
-	} else {
-		e = err
+		if _, ok := e.(*syscall.Errno); ok {
+			return e
+		}
 	}
 
 	if e == os.ErrNotExist {
 		return syscall.ENOENT
 	}
+
 	if e == os.ErrPermission {
 		return syscall.EPERM
 	}
+
 	if e == os.ErrExist {
 		return syscall.EEXIST
 	}
 
-	return e
+	if e == os.ErrClosed {
+		return syscall.EBADF
+	}
+
+	if e == io.EOF {
+		return e
+	}
+
+	logger.Warn(fmt.Sprintf("Unrecognized Error: %T %v. Returning: %v ", err, err, syscall.EIO), nil)
+	return syscall.EIO
 }
 
 func isNonRetriableError(err error) bool {
@@ -381,17 +402,17 @@ func (dfs *HdfsAccessorImpl) Mkdir(path string, mode os.FileMode) error {
 	defer dfs.unlockHadoopClient()
 
 	if dfs.MetadataClient == nil {
-		if err := dfs.ConnectMetadataClient(); err != nil {
-			return err
+		if err := dfs.connectMetadataClient(); err != nil {
+			return unwrapAndTranslateError(err)
 		}
 	}
 	err := dfs.MetadataClient.Mkdir(path, mode)
 	if err != nil {
 		if strings.HasSuffix(err.Error(), "file already exists") {
-			err = fuse.EEXIST
+			return unwrapAndTranslateError(err)
 		}
 	}
-	return err
+	return nil
 }
 
 // Removes file or directory
@@ -400,8 +421,8 @@ func (dfs *HdfsAccessorImpl) Remove(path string) error {
 	defer dfs.unlockHadoopClient()
 
 	if dfs.MetadataClient == nil {
-		if err := dfs.ConnectMetadataClient(); err != nil {
-			return err
+		if err := dfs.connectMetadataClient(); err != nil {
+			return unwrapAndTranslateError(err)
 		}
 	}
 	return dfs.MetadataClient.Remove(path)
@@ -413,8 +434,8 @@ func (dfs *HdfsAccessorImpl) Rename(oldPath string, newPath string) error {
 	defer dfs.unlockHadoopClient()
 
 	if dfs.MetadataClient == nil {
-		if err := dfs.ConnectMetadataClient(); err != nil {
-			return err
+		if err := dfs.connectMetadataClient(); err != nil {
+			return unwrapAndTranslateError(err)
 		}
 	}
 	return dfs.MetadataClient.Rename(oldPath, newPath)
@@ -426,8 +447,8 @@ func (dfs *HdfsAccessorImpl) Chmod(path string, mode os.FileMode) error {
 	defer dfs.unlockHadoopClient()
 
 	if dfs.MetadataClient == nil {
-		if err := dfs.ConnectMetadataClient(); err != nil {
-			return err
+		if err := dfs.connectMetadataClient(); err != nil {
+			return unwrapAndTranslateError(err)
 		}
 	}
 	return dfs.MetadataClient.Chmod(path, mode)
@@ -439,8 +460,8 @@ func (dfs *HdfsAccessorImpl) Chown(path string, user, group string) error {
 	defer dfs.unlockHadoopClient()
 
 	if dfs.MetadataClient == nil {
-		if err := dfs.ConnectMetadataClient(); err != nil {
-			return err
+		if err := dfs.connectMetadataClient(); err != nil {
+			return unwrapAndTranslateError(err)
 		}
 	}
 	return dfs.MetadataClient.Chown(path, user, group)
@@ -454,7 +475,7 @@ func (dfs *HdfsAccessorImpl) Close() error {
 	if dfs.MetadataClient != nil {
 		err := dfs.MetadataClient.Close()
 		dfs.MetadataClient = nil
-		return err
+		return unwrapAndTranslateError(err)
 	}
 	return nil
 }

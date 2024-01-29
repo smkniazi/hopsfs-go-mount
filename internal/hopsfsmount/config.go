@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"bazil.org/fuse"
+	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 )
 
 const (
@@ -74,10 +75,10 @@ func ParseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	if err := checkLogFileCreation(); err != nil {
 		log.Fatalf("Error creating log file. Error: %v", err)
 	}
-	initLogger(LogLevel, false, LogFile)
+	logger.InitLogger(LogLevel, false, LogFile)
 
-	Loginfo(fmt.Sprintf("Staging dir is:%s, Using TLS: %v, RetryAttempts: %d,  LogFile: %s", StagingDir, Tls, retryPolicy.MaxAttempts, LogFile), nil)
-	Loginfo(fmt.Sprintf("hopsfs-mount: current head GITCommit: %s Built time: %s Built by: %s ", GITCOMMIT, BUILDTIME, HOSTNAME), nil)
+	logger.Info(fmt.Sprintf("Staging dir is:%s, Using TLS: %v, RetryAttempts: %d,  LogFile: %s", StagingDir, Tls, retryPolicy.MaxAttempts, LogFile), nil)
+	logger.Info(fmt.Sprintf("hopsfs-mount: current head GITCommit: %s Built time: %s Built by: %s ", GITCOMMIT, BUILDTIME, HOSTNAME), nil)
 }
 
 // check that we can create / open the log file

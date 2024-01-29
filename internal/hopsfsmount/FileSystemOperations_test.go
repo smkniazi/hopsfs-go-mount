@@ -18,6 +18,7 @@ import (
 	"bazil.org/fuse/fs/fstestutil"
 	"github.com/colinmarc/hdfs/v2"
 	"golang.org/x/sys/unix"
+	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/ugcache"
 )
 
@@ -42,7 +43,7 @@ func TestReadWriteEmptyFile(t *testing.T) {
 			}
 			os.Remove(testFile)
 		}
-		Logdebug("Done", nil)
+		logger.Debug("Done", nil)
 	})
 }
 
@@ -52,7 +53,7 @@ func TestSimple(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			testFile := filepath.Join(mountPoint, fmt.Sprintf("somefile_%d", i))
 			os.Remove(testFile)
-			Loginfo(fmt.Sprintf("New file: %s", testFile), nil)
+			logger.Info(fmt.Sprintf("New file: %s", testFile), nil)
 			createFile(t, testFile, "some data")
 			os.Remove(testFile)
 		}
@@ -66,7 +67,7 @@ func TestTruncate(t *testing.T) {
 		testFile := filepath.Join(mountPoint, "somefile")
 		os.Remove(testFile)
 
-		Loginfo(fmt.Sprintf("New file: %s", testFile), nil)
+		logger.Info(fmt.Sprintf("New file: %s", testFile), nil)
 		data1 := "123456790"
 		data2 := "abcde"
 		createFile(t, testFile, data1)
@@ -142,7 +143,7 @@ func TestTruncateGreaterLength(t *testing.T) {
 		}
 
 		os.Remove(testFile1)
-		Logdebug("Done", nil)
+		logger.Debug("Done", nil)
 	})
 }
 
@@ -154,7 +155,7 @@ func TestMultipleRWCllients(t *testing.T) {
 		// mountPoint = "/tmp"
 		testFile1 := filepath.Join(mountPoint, "somefile")
 		testFile2 := filepath.Join(mountPoint, "somefile.bak")
-		Loginfo(fmt.Sprintf("New file: %s", testFile1), nil)
+		logger.Info(fmt.Sprintf("New file: %s", testFile1), nil)
 		createFile(t, testFile1, "initial data\nadsf\n")
 
 		c1, _ := os.OpenFile(testFile1, os.O_RDWR, 0600)
@@ -176,7 +177,7 @@ func TestMultipleRWCllients(t *testing.T) {
 		if err != nil {
 			t.Error("The file should have opened successfully")
 		} else {
-			Loginfo("File opened successfully", nil)
+			logger.Info("File opened successfully", nil)
 			buffer := make([]byte, 1024)
 			c5.Read(buffer)
 			//fmt.Printf("%s", buffer)
@@ -215,7 +216,7 @@ func TestMountSubDir(t *testing.T) {
 		if len(content) != filesPdir {
 			t.Errorf("Failed. Expected == %d, Got %d ", filesPdir, len(content))
 			for _, ent := range content {
-				Loginfo(fmt.Sprintf("file/dir %s", ent.Name()), nil)
+				logger.Info(fmt.Sprintf("file/dir %s", ent.Name()), nil)
 			}
 		}
 	})
@@ -277,7 +278,7 @@ func seekTest(t *testing.T, dataSize int, diskSeekTestFile string, dfsSeekTestFi
 
 func prepare(t *testing.T, client *hdfs.Client, dataSize int, diskTestFile string, dfsTestFile string) {
 
-	Loginfo("Creating test data ...", nil)
+	logger.Info("Creating test data ...", nil)
 	recreateDFSFile := false
 	if _, err := os.Stat(diskTestFile); errors.Is(err, os.ErrNotExist) {
 		testFile, err := os.Create(diskTestFile)
@@ -423,7 +424,7 @@ func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor
 	// Wrapping with FaultTolerantHdfsAccessor
 	retryPolicy := NewDefaultRetryPolicy(WallClock{})
 	retryPolicy.MaxAttempts = 1 // for quick failure
-	initLogger("INFO", false, "")
+	logger.InitLogger("INFO", false, "")
 	hdfsAccessor, _ := NewHdfsAccessor("localhost:8020", WallClock{}, TLSConfig{TLS: false, RootCABundle: RootCABundle, ClientCertificate: ClientCertificate, ClientKey: ClientKey})
 	err := hdfsAccessor.EnsureConnected()
 	if err != nil {
@@ -445,7 +446,7 @@ func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor
 
 	}
 	defer mnt.Close()
-	Loginfo(fmt.Sprintf("Connected to HopsFS. Mount point is %s", mnt.Dir), nil)
+	logger.Info(fmt.Sprintf("Connected to HopsFS. Mount point is %s", mnt.Dir), nil)
 
 	//disable polling
 	disablePolling(mnt.Dir)
@@ -532,7 +533,7 @@ func disablePolling(rootDir string) {
 	filePath := fmt.Sprintf("%s/__file_to_diable_polling__", rootDir)
 	file, err := os.Create(filePath)
 	if err != nil {
-		Logerror(fmt.Sprintf("Error opening file: %v", err), nil)
+		logger.Error(fmt.Sprintf("Error opening file: %v", err), nil)
 		return
 	}
 	defer os.Remove(filePath)
@@ -542,7 +543,7 @@ func disablePolling(rootDir string) {
 	fd := int(file.Fd())
 	epollFd, err := unix.EpollCreate1(0)
 	if err != nil {
-		Logerror(fmt.Sprintf("Error creating epoll instance: %v", err), nil)
+		logger.Error(fmt.Sprintf("Error creating epoll instance: %v", err), nil)
 		return
 	}
 	defer unix.Close(epollFd)
@@ -553,7 +554,7 @@ func disablePolling(rootDir string) {
 		Fd:     int32(fd),
 	}
 	if err := unix.EpollCtl(epollFd, unix.EPOLL_CTL_ADD, fd, &event); err != nil {
-		Logerror(fmt.Sprintf("Error adding file descriptor to epoll: %v", err), nil)
+		logger.Error(fmt.Sprintf("Error adding file descriptor to epoll: %v", err), nil)
 		return
 	}
 
@@ -562,13 +563,13 @@ func disablePolling(rootDir string) {
 	events := make([]unix.EpollEvent, 1)
 	n, err := unix.EpollWait(epollFd, events, 1000)
 	if err != nil {
-		Logerror(fmt.Sprintf("Error waiting for events: %v", err), nil)
+		logger.Error(fmt.Sprintf("Error waiting for events: %v", err), nil)
 		return
 	}
 
 	if n > 0 {
 		// File is ready for reading
-		Logdebug("File is ready for polling.", nil)
+		logger.Debug("File is ready for polling.", nil)
 	}
 
 }

@@ -9,6 +9,7 @@ import (
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
+	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 
 	"golang.org/x/net/context"
 
@@ -72,7 +73,7 @@ func (filesystem *FileSystem) Unmount(mountPoint string) {
 		return
 	}
 	filesystem.Mounted = false
-	Loginfo("Unmounting...", nil)
+	logger.Info("Unmounting...", nil)
 	cmd := exec.Command("fusermount3", "-zu", mountPoint)
 	err := cmd.Run()
 
@@ -84,7 +85,7 @@ func (filesystem *FileSystem) Unmount(mountPoint string) {
 	}
 
 	if err != nil {
-		Logfatal(fmt.Sprintf("Unable to unmount FS. Error: %v", err), nil)
+		logger.Fatal(fmt.Sprintf("Unable to unmount FS. Error: %v", err), nil)
 	}
 }
 
@@ -93,7 +94,7 @@ func (filesystem *FileSystem) Root() (fs.Node, error) {
 	//get UID and GID for the current user
 	cu, err := user.Current()
 	if err != nil {
-		Logfatal(fmt.Sprintf("Faile to get current user information. Error: %v", err), nil)
+		logger.Fatal(fmt.Sprintf("Faile to get current user information. Error: %v", err), nil)
 	}
 	uid64, _ := strconv.ParseUint(cu.Uid, 10, 32)
 	gid64, _ := strconv.ParseUint(cu.Gid, 10, 32)
@@ -137,7 +138,7 @@ func (filesystem *FileSystem) CloseOnUnmount(file io.Closer) {
 func (filesystem *FileSystem) Statfs(ctx context.Context, req *fuse.StatfsRequest, resp *fuse.StatfsResponse) error {
 	fsInfo, err := filesystem.getDFSConnector().StatFs()
 	if err != nil {
-		Logwarn("Stat DFS failed", Fields{Operation: StatFS, Error: err})
+		logger.Warn("Stat DFS failed", logger.Fields{Operation: StatFS, Error: err})
 		return err
 	}
 	resp.Bsize = 1024

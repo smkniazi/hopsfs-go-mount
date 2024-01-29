@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"os"
+
+	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 )
 
 type RemoteROFileProxy struct {
@@ -18,14 +20,14 @@ var _ FileProxy = (*RemoteROFileProxy)(nil)
 func (p *RemoteROFileProxy) Truncate(size int64) (int64, error) {
 	p.file.lockFileHandles()
 	defer p.file.unlockFileHandles()
-	Logfatal("Truncate API is not supported. Read only mode", nil)
+	logger.Fatal("Truncate API is not supported. Read only mode", nil)
 	return 0, nil
 }
 
 func (p *RemoteROFileProxy) WriteAt(b []byte, off int64) (n int, err error) {
 	p.file.lockFileHandles()
 	defer p.file.unlockFileHandles()
-	Logfatal("WriteAt API is not supported. Read only mode", nil)
+	logger.Fatal("WriteAt API is not supported. Read only mode", nil)
 	return 0, nil
 }
 
@@ -33,7 +35,7 @@ func (p *RemoteROFileProxy) ReadAt(b []byte, off int64) (int, error) {
 	p.file.lockFileHandles()
 	defer p.file.unlockFileHandles()
 
-	Logdebug("RemoteFileProxy ReadAt", p.file.logInfo(Fields{Operation: Read, Offset: off}))
+	logger.Debug("RemoteFileProxy ReadAt", p.file.logInfo(logger.Fields{Operation: Read, Offset: off}))
 
 	if off < 0 {
 		return 0, &os.PathError{Op: "readat", Path: p.file.AbsolutePath(), Err: errors.New("negative offset")}
@@ -62,11 +64,11 @@ func (p *RemoteROFileProxy) ReadAt(b []byte, off int64) (int, error) {
 
 	if err != nil && err == io.EOF && n > 0 {
 		// no need to throw io.EOF
-		Logdebug("RemoteFileProxy Finished reading", nil)
+		logger.Debug("RemoteFileProxy Finished reading", nil)
 		err = nil
 	}
 
-	Logdebug("RemoteFileProxy ReadAt", p.file.logInfo(Fields{Operation: Read, MaxBytesToRead: maxBytesToRead,
+	logger.Debug("RemoteFileProxy ReadAt", p.file.logInfo(logger.Fields{Operation: Read, MaxBytesToRead: maxBytesToRead,
 		BytesRead: n, Error: err, Offset: off}))
 	return n, err
 }
@@ -77,10 +79,10 @@ func (p *RemoteROFileProxy) SeekToStart() (err error) {
 
 	err = p.hdfsReader.Seek(0)
 	if err != nil {
-		Logdebug("RemoteFileProxy SeekToStart failed", p.file.logInfo(Fields{Operation: SeekToStart, Offset: 0, Error: err}))
+		logger.Debug("RemoteFileProxy SeekToStart failed", p.file.logInfo(logger.Fields{Operation: SeekToStart, Offset: 0, Error: err}))
 		return err
 	} else {
-		Logdebug("RemoteFileProxy SeekToStart", p.file.logInfo(Fields{Operation: SeekToStart, Offset: 0}))
+		logger.Debug("RemoteFileProxy SeekToStart", p.file.logInfo(logger.Fields{Operation: SeekToStart, Offset: 0}))
 		return nil
 	}
 
@@ -92,10 +94,10 @@ func (p *RemoteROFileProxy) Read(b []byte) (n int, err error) {
 	n, err = p.hdfsReader.Read(b)
 
 	if err != nil {
-		Logdebug("RemoteFileProxy Read", p.file.logInfo(Fields{Operation: Read, MaxBytesToRead: len(b), Error: err}))
+		logger.Debug("RemoteFileProxy Read", p.file.logInfo(logger.Fields{Operation: Read, MaxBytesToRead: len(b), Error: err}))
 		return n, err
 	} else {
-		Logdebug("RemoteFileProxy Read", p.file.logInfo(Fields{Operation: Read, MaxBytesToRead: len(b), TotalBytesRead: n}))
+		logger.Debug("RemoteFileProxy Read", p.file.logInfo(logger.Fields{Operation: Read, MaxBytesToRead: len(b), TotalBytesRead: n}))
 		return n, nil
 	}
 }
@@ -104,10 +106,10 @@ func (p *RemoteROFileProxy) Close() error {
 	//NOTE: Locking is done in File.go
 	err := p.hdfsReader.Close()
 	if err != nil {
-		Logdebug("RemoteFileProxy Close failed", p.file.logInfo(Fields{Operation: Close, Error: err}))
+		logger.Debug("RemoteFileProxy Close failed", p.file.logInfo(logger.Fields{Operation: Close, Error: err}))
 		return err
 	} else {
-		Logdebug("RemoteFileProxy Close", p.file.logInfo(Fields{Operation: Close}))
+		logger.Debug("RemoteFileProxy Close", p.file.logInfo(logger.Fields{Operation: Close}))
 		return nil
 	}
 }
@@ -116,6 +118,6 @@ func (p *RemoteROFileProxy) Sync() error {
 	p.file.lockFileHandles()
 	defer p.file.unlockFileHandles()
 
-	Logfatal("Sync API is not supported. Read only mode", nil)
+	logger.Fatal("Sync API is not supported. Read only mode", nil)
 	return nil
 }

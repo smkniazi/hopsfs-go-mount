@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"bazil.org/fuse"
+	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/ugcache"
 )
 
 func ChmodOp(attrs *Attrs, fileSystem *FileSystem, path string, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
-	Loginfo("Setting attributes", Fields{Operation: Chmod, Path: path, Mode: req.Mode})
+	logger.Info("Setting attributes", logger.Fields{Operation: Chmod, Path: path, Mode: req.Mode})
 	err := fileSystem.getDFSConnector().Chmod(path, req.Mode)
 	if err != nil {
 		return err
@@ -57,7 +58,7 @@ func ChownOp(attrs *Attrs, fileSystem *FileSystem, path string, uid uint32, gid 
 		if err == nil {
 			groupName = pathGroupName
 		} else {
-			Logwarn(err.Error(), Fields{Path: path})
+			logger.Warn(err.Error(), logger.Fields{Path: path})
 		}
 	} else {
 		groupName = ugcache.LookupGroupName(gid)
@@ -67,7 +68,7 @@ func ChownOp(attrs *Attrs, fileSystem *FileSystem, path string, uid uint32, gid 
 		return fmt.Errorf(fmt.Sprintf("Setattr failed. Unable to find group information. Path %s", path))
 	}
 
-	Loginfo("Setting attributes", Fields{Operation: Chown, Path: path, UID: uid, User: userName, GID: gid, Group: groupName})
+	logger.Info("Setting attributes", logger.Fields{Operation: Chown, Path: path, UID: uid, User: userName, GID: gid, Group: groupName})
 	err := fileSystem.getDFSConnector().Chown(path, userName, groupName)
 
 	if err != nil {
@@ -83,7 +84,7 @@ func UpdateTS(attrs *Attrs, fileSystem *FileSystem, path string, req *fuse.Setat
 
 	// in future if we need access time then we can update the file system client to support it
 	if req.Valid.Atime() {
-		Logdebug("The stat op in hopsfs client returns os.FileInfo which does not have access time. Ignoring atime for now", nil)
+		logger.Debug("The stat op in hopsfs client returns os.FileInfo which does not have access time. Ignoring atime for now", nil)
 	}
 
 	if req.Valid.Mtime() {
@@ -91,26 +92,26 @@ func UpdateTS(attrs *Attrs, fileSystem *FileSystem, path string, req *fuse.Setat
 	}
 
 	if req.Valid.Handle() {
-		Logwarn("Setattr Handle is not implemented yet.", nil)
+		logger.Warn("Setattr Handle is not implemented yet.", nil)
 	}
 
 	if req.Valid.AtimeNow() {
-		Logdebug("Setattr AtimeNow is not implemented yet.", nil)
+		logger.Debug("Setattr AtimeNow is not implemented yet.", nil)
 	}
 
 	if req.Valid.MtimeNow() {
-		Logdebug("Setattr MtimeNow is not implemented yet.", nil)
+		logger.Debug("Setattr MtimeNow is not implemented yet.", nil)
 	}
 
 	if req.Valid.LockOwner() {
-		Logwarn("Setattr LockOwner is not implemented yet.", nil)
+		logger.Warn("Setattr LockOwner is not implemented yet.", nil)
 	}
 
 	return nil
 }
 
 func getGroupNameFromPath(path string) (string, error) {
-	Loginfo("Getting group name from path", Fields{Path: path})
+	logger.Info("Getting group name from path", logger.Fields{Path: path})
 	result := HopfsProjectDatasetGroupRegex.FindAllStringSubmatch(path, -1)
 	if len(result) == 0 {
 		return "", errors.New("could not get project name and dataset name from path " + path)

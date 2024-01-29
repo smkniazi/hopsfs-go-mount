@@ -11,6 +11,7 @@ import (
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"golang.org/x/net/context"
+	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 )
 
 // Represents a handle to an open file
@@ -49,13 +50,13 @@ func (fh *FileHandle) Truncate(size int64) error {
 
 	sizeChanged, err := fh.File.fileProxy.Truncate(size)
 	if err != nil {
-		Logerror("Failed to truncate file", fh.logInfo(Fields{Operation: Truncate, Bytes: size, Error: err}))
+		logger.Error("Failed to truncate file", fh.logInfo(logger.Fields{Operation: Truncate, Bytes: size, Error: err}))
 		return err
 	}
 
 	fh.totalBytesWritten += sizeChanged
 
-	Loginfo("Truncated file", fh.logInfo(Fields{Operation: Truncate, Bytes: size}))
+	logger.Info("Truncated file", fh.logInfo(logger.Fields{Operation: Truncate, Bytes: size}))
 	return nil
 }
 
@@ -78,14 +79,14 @@ func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fus
 
 	if err != nil {
 		if err == io.EOF {
-			Logdebug("Completed reading", fh.logInfo(Fields{Operation: Read, Error: err, Bytes: nr}))
+			logger.Debug("Completed reading", fh.logInfo(logger.Fields{Operation: Read, Error: err, Bytes: nr}))
 			if nr >= 0 {
 				return nil
 			} else {
 				return err
 			}
 		} else {
-			Logerror("Failed to read", fh.logInfo(Fields{Operation: Read, Error: err, Bytes: nr}))
+			logger.Error("Failed to read", fh.logInfo(logger.Fields{Operation: Read, Error: err, Bytes: nr}))
 			return err
 		}
 	}
@@ -104,10 +105,10 @@ func (fh *FileHandle) Write(ctx context.Context, req *fuse.WriteRequest, resp *f
 	resp.Size = nw
 	fh.totalBytesWritten += int64(nw)
 	if err != nil {
-		Logerror("Failed to write to staging file", fh.logInfo(Fields{Operation: Write, Error: err}))
+		logger.Error("Failed to write to staging file", fh.logInfo(logger.Fields{Operation: Write, Error: err}))
 		return err
 	} else {
-		Logdebug("Write data to staging file", fh.logInfo(Fields{Operation: Write, Bytes: nw, ReqOffset: req.Offset}))
+		logger.Debug("Write data to staging file", fh.logInfo(logger.Fields{Operation: Write, Bytes: nw, ReqOffset: req.Offset}))
 		return nil
 	}
 }
@@ -118,7 +119,7 @@ func (fh *FileHandle) copyToDFS(operation string) error {
 	}
 	defer fh.File.InvalidateMetadataCache()
 
-	Logdebug("Uploading to DFS", fh.logInfo(Fields{Operation: operation, Bytes: fh.totalBytesWritten}))
+	logger.Debug("Uploading to DFS", fh.logInfo(logger.Fields{Operation: operation, Bytes: fh.totalBytesWritten}))
 
 	op := fh.File.FileSystem.RetryPolicy.StartOperation()
 	for {
@@ -128,7 +129,7 @@ func (fh *FileHandle) copyToDFS(operation string) error {
 		}
 		// Reconnect and try again
 		fh.File.FileSystem.getDFSConnector().Close()
-		Logwarn("Failed to copy file to DFS", fh.logInfo(Fields{Operation: operation}))
+		logger.Warn("Failed to copy file to DFS", fh.logInfo(logger.Fields{Operation: operation}))
 	}
 }
 
@@ -141,19 +142,19 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 	if err != nil {
 		// may be this is a retry and the file has already been deleted
 		// log error and continue
-		Logwarn("Unable to delete the file during flush.", fh.logInfo(Fields{Operation: operation, Error: err}))
+		logger.Warn("Unable to delete the file during flush.", fh.logInfo(logger.Fields{Operation: operation, Error: err}))
 	}
 
 	w, err := hdfsAccessor.CreateFile(fh.File.AbsolutePath(), fh.File.Attrs.Mode, true)
 	if err != nil {
-		Logerror("Error creating file in DFS", fh.logInfo(Fields{Operation: operation, Error: err}))
+		logger.Error("Error creating file in DFS", fh.logInfo(logger.Fields{Operation: operation, Error: err}))
 		return err
 	}
 
 	//open the file for reading and upload to DFS
 	err = fh.File.fileProxy.SeekToStart()
 	if err != nil {
-		Logerror("Unable to seek to the begenning of the temp file", fh.logInfo(Fields{Operation: operation, Error: err}))
+		logger.Error("Unable to seek to the begenning of the temp file", fh.logInfo(logger.Fields{Operation: operation, Error: err}))
 		return err
 	}
 
@@ -162,7 +163,7 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 		b := make([]byte, 65536)
 		nr, err := fh.File.fileProxy.Read(b)
 		if err != nil && err != io.EOF {
-			Logerror("Failed to read from staging file", fh.logInfo(Fields{Operation: operation, Error: err}))
+			logger.Error("Failed to read from staging file", fh.logInfo(logger.Fields{Operation: operation, Error: err}))
 			return err
 		}
 
@@ -170,14 +171,14 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 			b = b[:nr]
 			nw, err := w.Write(b)
 			if err != nil {
-				Logerror("Failed to write to DFS", fh.logInfo(Fields{Operation: operation, Error: err}))
+				logger.Error("Failed to write to DFS", fh.logInfo(logger.Fields{Operation: operation, Error: err}))
 				w.Close()
 				return err
 			}
 
 			if nr != nw {
-				Logerror(fmt.Sprintf("Incorrect bytes read/written. Bytes reads %d, %d", nr, nw),
-					fh.logInfo(Fields{Operation: operation, Error: err}))
+				logger.Error(fmt.Sprintf("Incorrect bytes read/written. Bytes reads %d, %d", nr, nw),
+					fh.logInfo(logger.Fields{Operation: operation, Error: err}))
 				w.Close()
 				return fmt.Errorf("incorrect bytes read/written. Bytes reads %d, %d", nr, nw)
 			}
@@ -192,10 +193,10 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 
 	err = w.Close()
 	if err != nil {
-		Logerror("Failed to close file in DFS", fh.logInfo(Fields{Operation: operation, Error: err}))
+		logger.Error("Failed to close file in DFS", fh.logInfo(logger.Fields{Operation: operation, Error: err}))
 		return err
 	}
-	Loginfo("Uploaded to DFS", fh.logInfo(Fields{Operation: operation, Bytes: written}))
+	logger.Info("Uploaded to DFS", fh.logInfo(logger.Fields{Operation: operation, Bytes: written}))
 
 	fh.File.Attrs.Size = written
 	return nil
@@ -206,10 +207,10 @@ func (fh *FileHandle) Flush(ctx context.Context, req *fuse.FlushRequest) error {
 	fh.lockHandle()
 	defer fh.unlockHandle()
 	if fh.dataChanged() {
-		Loginfo("Flush file", fh.logInfo(Fields{Operation: Flush}))
+		logger.Info("Flush file", fh.logInfo(logger.Fields{Operation: Flush}))
 		return fh.copyToDFS(Flush)
 	} else {
-		Loginfo("Flush file. Ignoring requst as no data has changed", fh.logInfo(Fields{Operation: Flush}))
+		logger.Info("Flush file. Ignoring requst as no data has changed", fh.logInfo(logger.Fields{Operation: Flush}))
 		return nil
 	}
 }
@@ -219,7 +220,7 @@ func (fh *FileHandle) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
 	fh.lockHandle()
 	defer fh.unlockHandle()
 	if fh.dataChanged() {
-		Loginfo("Fsync file", fh.logInfo(Fields{Operation: Fsync}))
+		logger.Info("Fsync file", fh.logInfo(logger.Fields{Operation: Fsync}))
 		return fh.copyToDFS(Fsync)
 	} else {
 		return nil
@@ -235,17 +236,17 @@ func (fh *FileHandle) Release(_ context.Context, _ *fuse.ReleaseRequest) error {
 	fh.File.InvalidateMetadataCache()
 	fh.File.RemoveHandle(fh)
 
-	Loginfo("Closed file handle ", fh.logInfo(Fields{Operation: Close, Flags: fh.fileFlags, TotalBytesRead: fh.tatalBytesRead, TotalBytesWritten: fh.totalBytesWritten}))
+	logger.Info("Closed file handle ", fh.logInfo(logger.Fields{Operation: Close, Flags: fh.fileFlags, TotalBytesRead: fh.tatalBytesRead, TotalBytesWritten: fh.totalBytesWritten}))
 	return nil
 }
 
 func (fh *FileHandle) Poll(ctx context.Context, req *fuse.PollRequest, resp *fuse.PollResponse) error {
-	Logwarn("Polling is not supported ", fh.logInfo(Fields{Operation: Poll}))
+	logger.Warn("Polling is not supported ", fh.logInfo(logger.Fields{Operation: Poll}))
 	return syscall.ENOSYS
 }
 
-func (fh *FileHandle) logInfo(fields Fields) Fields {
-	f := Fields{FileHandleID: fh.fhID, Path: fh.File.AbsolutePath()}
+func (fh *FileHandle) logInfo(fields logger.Fields) logger.Fields {
+	f := logger.Fields{FileHandleID: fh.fhID, Path: fh.File.AbsolutePath()}
 	for k, e := range fields {
 		f[k] = e
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/colinmarc/hdfs/v2"
 
 	"bazil.org/fuse"
+	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/ugcache"
 )
 
@@ -115,11 +116,11 @@ func (dfs *HdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 		}
 		hadoopUserID = ugcache.LookupUId(hadoopUserName)
 		if hadoopUserName != "root" && hadoopUserID == 0 {
-			Logwarn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", hadoopUserName), nil)
+			logger.Warn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", hadoopUserName), nil)
 		}
 	}
 
-	Loginfo(fmt.Sprintf("Connecting as user: %s UID: %d", hadoopUserName, hadoopUserID), nil)
+	logger.Info(fmt.Sprintf("Connecting as user: %s UID: %d", hadoopUserName, hadoopUserID), nil)
 
 	// Performing an attempt to connect to the name node
 	// Colinmar's hdfs implementation has supported the multiple name node connection
@@ -151,7 +152,7 @@ func (dfs *HdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 		return client, nil
 	} else {
 		client.Close()
-		Logerror(fmt.Sprintf("Faild to connect to NN. Error: %v ", statErr), nil)
+		logger.Error(fmt.Sprintf("Faild to connect to NN. Error: %v ", statErr), nil)
 		return nil, statErr
 	}
 }
@@ -291,11 +292,11 @@ func (dfs *HdfsAccessorImpl) AttrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 	// suppress these logs if forceOverrideUsername is provided
 	if ForceOverrideUsername == "" {
 		if fi.OwnerGroup() != "root" && gid == 0 {
-			Logwarn(fmt.Sprintf("Unable to find group id for group: %s, returning gid: 0", fi.OwnerGroup()), nil)
+			logger.Warn(fmt.Sprintf("Unable to find group id for group: %s, returning gid: 0", fi.OwnerGroup()), nil)
 		}
 
 		if fi.Owner() != "root" && uid == 0 {
-			Logwarn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", fi.Owner()), nil)
+			logger.Warn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", fi.Owner()), nil)
 		}
 	}
 

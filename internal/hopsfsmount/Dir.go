@@ -14,6 +14,7 @@ import (
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"golang.org/x/net/context"
+	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 )
 
 // Encapsulates state and operations for directory node on the HDFS file system
@@ -64,7 +65,7 @@ func (dir *DirINode) Attr(ctx context.Context, a *fuse.Attr) error {
 			return err
 		}
 	} else {
-		Loginfo("Stat successful. Returning from Cache ", Fields{Operation: GetattrDir, Path: path.Join(dir.AbsolutePath(), dir.Attrs.Name), FileSize: dir.Attrs.Size,
+		logger.Info("Stat successful. Returning from Cache ", logger.Fields{Operation: GetattrDir, Path: path.Join(dir.AbsolutePath(), dir.Attrs.Name), FileSize: dir.Attrs.Size,
 			IsDir: dir.Attrs.Mode.IsDir(), IsRegular: dir.Attrs.Mode.IsRegular()})
 	}
 	return dir.Attrs.ConvertAttrToFuse(a)
@@ -81,9 +82,9 @@ func (dir *DirINode) getChildInode(operation, name string) fs.Node {
 
 	node := dir.children[name]
 	if node != nil {
-		Logdebug("Children's List. getChildInode ", Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.children)})
+		logger.Debug("Children's List. getChildInode ", logger.Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.children)})
 	} else {
-		Logdebug("Children's List. getChildInode. Not Found  ", Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.children)})
+		logger.Debug("Children's List. getChildInode. Not Found  ", logger.Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.children)})
 	}
 
 	return node
@@ -103,7 +104,7 @@ func (dir *DirINode) addOrUpdateChildInodeAttrs(operation, name string, attrs At
 		} else if dnode, ok := (node).(*DirINode); ok {
 			dnode.Attrs = attrs
 		}
-		Logdebug("Children's List. addOrUpdateChildInodeAttrs. Update ", Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.children)})
+		logger.Debug("Children's List. addOrUpdateChildInodeAttrs. Update ", logger.Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.children)})
 		return node
 	} else {
 		var node fs.Node
@@ -113,7 +114,7 @@ func (dir *DirINode) addOrUpdateChildInodeAttrs(operation, name string, attrs At
 			node = &DirINode{FileSystem: dir.FileSystem, Parent: dir, Attrs: attrs}
 		}
 		dir.children[name] = node
-		Logdebug("Children's List. addOrUpdateChildInodeAttrs. Add ", Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.children)})
+		logger.Debug("Children's List. addOrUpdateChildInodeAttrs. Add ", logger.Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.children)})
 		return node
 	}
 }
@@ -124,7 +125,7 @@ func (dir *DirINode) removeChildInode(operation, name string) {
 
 	if dir.children != nil {
 		delete(dir.children, name)
-		Logdebug("Children's List. removeChildInode ", Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.children)})
+		logger.Debug("Children's List. removeChildInode ", logger.Fields{Operation: operation, Parent: dir.AbsolutePath(), Child: name, NumChildren: len(dir.children)})
 	}
 }
 
@@ -155,11 +156,11 @@ func (dir *DirINode) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	defer dir.unlockMutex()
 
 	absolutePath := dir.AbsolutePath()
-	Loginfo("Read directory", Fields{Operation: ReadDir, Path: absolutePath})
+	logger.Info("Read directory", logger.Fields{Operation: ReadDir, Path: absolutePath})
 
 	allAttrs, err := dir.FileSystem.getDFSConnector().ReadDir(absolutePath)
 	if err != nil {
-		Logwarn("Failed to list DFS directory", Fields{Operation: ReadDir, Path: absolutePath, Error: err})
+		logger.Warn("Failed to list DFS directory", logger.Fields{Operation: ReadDir, Path: absolutePath, Error: err})
 		return nil, err
 	}
 
@@ -185,14 +186,14 @@ func (dir *DirINode) statInodeInHopsFS(operation, name string, attrs *Attrs) (fs
 
 	a, err := dir.FileSystem.getDFSConnector().Stat(path.Join(dir.AbsolutePath(), name))
 	if err != nil {
-		Loginfo("Stat failed on backend", Fields{Operation: operation, Path: path.Join(dir.AbsolutePath(), name), Error: err})
+		logger.Info("Stat failed on backend", logger.Fields{Operation: operation, Path: path.Join(dir.AbsolutePath(), name), Error: err})
 		dir.removeChildInode(operation, name)
 		return nil, err
 	}
 	*attrs = a
 
 	inode := dir.addOrUpdateChildInodeAttrs(operation, name, *attrs)
-	Loginfo("Stat successful on backend", Fields{Operation: operation, Path: path.Join(dir.AbsolutePath(), name), FileSize: attrs.Size,
+	logger.Info("Stat successful on backend", logger.Fields{Operation: operation, Path: path.Join(dir.AbsolutePath(), name), FileSize: attrs.Size,
 		IsDir: attrs.Mode.IsDir(), IsRegular: attrs.Mode.IsRegular()})
 	return inode, nil
 }
@@ -204,14 +205,14 @@ func (dir *DirINode) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node
 
 	err := dir.FileSystem.getDFSConnector().Mkdir(dir.AbsolutePathForChild(req.Name), req.Mode)
 	if err != nil {
-		Loginfo("mkdir failed", Fields{Operation: Mkdir, Path: path.Join(dir.AbsolutePath(), req.Name), Error: err})
+		logger.Info("mkdir failed", logger.Fields{Operation: Mkdir, Path: path.Join(dir.AbsolutePath(), req.Name), Error: err})
 		return nil, err
 	}
-	Logdebug("mkdir successful", Fields{Operation: Mkdir, Path: path.Join(dir.AbsolutePath(), req.Name)})
+	logger.Debug("mkdir successful", logger.Fields{Operation: Mkdir, Path: path.Join(dir.AbsolutePath(), req.Name)})
 
 	err = ChownOp(&dir.Attrs, dir.FileSystem, dir.AbsolutePathForChild(req.Name), req.Uid, req.Gid)
 	if err != nil {
-		Logwarn("Unable to change ownership of new dir", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name),
+		logger.Warn("Unable to change ownership of new dir", logger.Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name),
 			UID: req.Uid, GID: req.Gid, Error: err})
 		//unable to change the ownership of the directory. so delete it as the operation as a whole failed
 		dir.FileSystem.getDFSConnector().Remove(dir.AbsolutePathForChild(req.Name))
@@ -227,11 +228,11 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 	dir.lockMutex()
 	defer dir.unlockMutex()
 
-	Loginfo("Creating a new file", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags})
+	logger.Info("Creating a new file", logger.Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags})
 	file := (dir.addOrUpdateChildInodeAttrs(Create, req.Name, Attrs{Name: req.Name, Mode: req.Mode})).(*FileINode)
 	handle, err := file.NewFileHandle(false, req.Flags)
 	if err != nil {
-		Logerror("File creation failed", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags, Error: err})
+		logger.Error("File creation failed", logger.Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags, Error: err})
 		dir.removeChildInode(Create, req.Name)
 		return nil, nil, err
 	}
@@ -239,7 +240,7 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 	file.AddHandle(handle)
 	err = ChownOp(&dir.Attrs, dir.FileSystem, dir.AbsolutePathForChild(req.Name), req.Uid, req.Gid)
 	if err != nil {
-		Logwarn("Unable to change ownership of new file", Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name),
+		logger.Warn("Unable to change ownership of new file", logger.Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name),
 			UID: req.Uid, GID: req.Gid, Error: err})
 		//unable to change the ownership of the file. so delete it as the operation as a whole failed
 		dir.FileSystem.getDFSConnector().Remove(dir.AbsolutePathForChild(req.Name))
@@ -263,12 +264,12 @@ func (dir *DirINode) Remove(ctx context.Context, req *fuse.RemoveRequest) error 
 	defer dir.unlockMutex()
 
 	path := dir.AbsolutePathForChild(req.Name)
-	Loginfo("Removing path", Fields{Operation: Remove, Path: path})
+	logger.Info("Removing path", logger.Fields{Operation: Remove, Path: path})
 	err := dir.FileSystem.getDFSConnector().Remove(path)
 	if err == nil {
 		dir.removeChildInode(Remove, req.Name)
 	} else {
-		Logwarn("Failed to remove path", Fields{Operation: Remove, Path: path, Error: err})
+		logger.Warn("Failed to remove path", logger.Fields{Operation: Remove, Path: path, Error: err})
 	}
 	return err
 }
@@ -280,7 +281,7 @@ func (dir *DirINode) Rename(ctx context.Context, req *fuse.RenameRequest, newDir
 
 	oldPath := dir.AbsolutePathForChild(req.OldName)
 	newPath := newDir.(*DirINode).AbsolutePathForChild(req.NewName)
-	Loginfo("Renaming to "+newPath, Fields{Operation: Rename, Path: oldPath})
+	logger.Info("Renaming to "+newPath, logger.Fields{Operation: Rename, Path: oldPath})
 	err := dir.FileSystem.getDFSConnector().Rename(oldPath, newPath)
 	if err == nil {
 		// Upon successful rename, updating in-memory representation of the file entry
@@ -313,14 +314,14 @@ func (dir *DirINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp
 
 	if req.Valid.Mode() {
 		if err := ChmodOp(&dir.Attrs, dir.FileSystem, path, req, resp); err != nil {
-			Logwarn("Setattr (chmod) failed. ", Fields{Operation: Chmod, Path: path, Mode: req.Mode})
+			logger.Warn("Setattr (chmod) failed. ", logger.Fields{Operation: Chmod, Path: path, Mode: req.Mode})
 			return err
 		}
 	}
 
 	if req.Valid.Uid() || req.Valid.Gid() {
 		if err := SetAttrChownOp(&dir.Attrs, dir.FileSystem, path, req, resp); err != nil {
-			Logwarn("Setattr (chown/chgrp )failed", Fields{Operation: Chmod, Path: path, UID: req.Uid, GID: req.Gid})
+			logger.Warn("Setattr (chown/chgrp )failed", logger.Fields{Operation: Chmod, Path: path, UID: req.Uid, GID: req.Gid})
 			return err
 		}
 	}
@@ -337,7 +338,7 @@ func (dir *DirINode) Forget() {
 	dir.lockMutex()
 	defer dir.unlockMutex()
 	// ask parent to remove me from the children list
-	Logdebug(fmt.Sprintf("Forget for dir %s", dir.Attrs.Name), nil)
+	logger.Debug(fmt.Sprintf("Forget for dir %s", dir.Attrs.Name), nil)
 	dir.Parent.removeChildInode(Forget, dir.Attrs.Name)
 }
 

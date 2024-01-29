@@ -15,6 +15,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	go_git_config "github.com/go-git/go-git/v5/config"
 	"github.com/stretchr/testify/require"
+	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 )
 
 func TestGitClone(t *testing.T) {
@@ -65,7 +66,7 @@ func TestGit2(t *testing.T) {
 		}
 
 		// clone repo
-		Loginfo(fmt.Sprintf("Cloning at path: %s ", repoPath), nil)
+		logger.Info(fmt.Sprintf("Cloning at path: %s ", repoPath), nil)
 		gitCloneOptions := &git.CloneOptions{
 			URL:               fmt.Sprintf("%s%s", "https://github.com/gibchikafa/", repoName),
 			RecurseSubmodules: git.DefaultSubmoduleRecursionDepth,
@@ -79,7 +80,7 @@ func TestGit2(t *testing.T) {
 		// Add a new remote, with the default fetch refspec
 		remoteName := "logicalclocks"
 		remoteUrl := fmt.Sprintf("%s%s", "https://github.com/logicalclocks/", repoName)
-		Loginfo(fmt.Sprintf("Adding remote. Remote name: %s, remote url: %s", remoteName, remoteUrl), nil)
+		logger.Info(fmt.Sprintf("Adding remote. Remote name: %s, remote url: %s", remoteName, remoteUrl), nil)
 		_, err = repo.CreateRemote(&go_git_config.RemoteConfig{
 			Name: remoteName,
 			URLs: []string{remoteUrl},
@@ -88,7 +89,7 @@ func TestGit2(t *testing.T) {
 		if err != nil {
 			t.Errorf("Failed %v", err.Error())
 		} else {
-			Loginfo(fmt.Sprintf("Successfully added remote %s. Url %s", remoteName, remoteUrl), nil)
+			logger.Info(fmt.Sprintf("Successfully added remote %s. Url %s", remoteName, remoteUrl), nil)
 		}
 
 		//Get new remote list
@@ -136,14 +137,14 @@ func TestGit2(t *testing.T) {
 
 		//set config
 		cmd := "git config user.name " + "\"" + committerName + "\""
-		Loginfo(fmt.Sprintf("Set git user.name config command: %s", cmd), nil)
+		logger.Info(fmt.Sprintf("Set git user.name config command: %s", cmd), nil)
 		err = ExecuteOnPath(repoPath, cmd)
 		if err != nil {
 			t.Errorf("Failed %v", err.Error())
 		}
 
 		cmd = "git config user.email " + "\"" + committerEmail + "\""
-		Loginfo(fmt.Sprintf("Set git user.email config command: %s", cmd), nil)
+		logger.Info(fmt.Sprintf("Set git user.email config command: %s", cmd), nil)
 		err = ExecuteOnPath(repoPath, cmd)
 		if err != nil {
 			t.Errorf("Failed %v", err.Error())
@@ -153,11 +154,11 @@ func TestGit2(t *testing.T) {
 		cmd = "git rebase "
 		if branchName != "" && remoteName != "" {
 			cmd = cmd + remoteName + "/" + branchName + " " + currentBranch
-			Loginfo(fmt.Sprintf("Applying git rebase:  `%s`", cmd), nil)
+			logger.Info(fmt.Sprintf("Applying git rebase:  `%s`", cmd), nil)
 
 			if err = ExecuteOnPath(repoPath, cmd); err != nil && err.Error() != "already up-to-date" {
-				Logerror(err.Error(), nil)
-				Logerror("Aborting rebase", nil)
+				logger.Error(err.Error(), nil)
+				logger.Error("Aborting rebase", nil)
 				ExecuteOnPath(repoPath, "git rebase --abort") //Noted if an error occurs the HEAD is detached
 				t.Errorf("Fail %s, %v", cmd, err)
 			}
@@ -174,7 +175,7 @@ func TestGit2(t *testing.T) {
 }
 
 func ExecuteOnPath(path string, cmd string) error {
-	Loginfo(fmt.Sprintf("Executing command `%s` on path %s", cmd, path), nil)
+	logger.Info(fmt.Sprintf("Executing command `%s` on path %s", cmd, path), nil)
 	args := strings.Split(cmd, " ")
 	c := exec.Command(args[0], args[1:]...)
 	c.Dir = path

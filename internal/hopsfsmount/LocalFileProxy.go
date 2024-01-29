@@ -1,8 +1,13 @@
+// Copyright (c) Hopsworks AB. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for details.
+
 package hopsfsmount
 
 import (
 	"math"
 	"os"
+
+	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 )
 
 type LocalRWFileProxy struct {
@@ -44,7 +49,7 @@ func (p *LocalRWFileProxy) ReadAt(b []byte, off int64) (n int, err error) {
 	p.file.lockFileHandles()
 	defer p.file.unlockFileHandles()
 	n, err = p.localFile.ReadAt(b, off)
-	Logdebug("LocalFileProxy ReadAt", p.file.logInfo(Fields{Operation: Read, Bytes: n, Error: err, Offset: off}))
+	logger.Debug("LocalFileProxy ReadAt", p.file.logInfo(logger.Fields{Operation: Read, Bytes: n, Error: err, Offset: off}))
 	return
 }
 

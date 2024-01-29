@@ -19,6 +19,7 @@ import (
 	"bazil.org/fuse/fs"
 	"golang.org/x/net/context"
 	"golang.org/x/sys/unix"
+	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 )
 
 type FileINode struct {
@@ -59,7 +60,7 @@ func (file *FileINode) Attr(ctx context.Context, a *fuse.Attr) error {
 	if lrwfp, ok := file.fileProxy.(*LocalRWFileProxy); ok {
 		fileInfo, err := lrwfp.localFile.Stat()
 		if err != nil {
-			Logwarn("stat failed on staging file", Fields{Operation: GetattrFile, Path: file.AbsolutePath(), Error: err})
+			logger.Warn("stat failed on staging file", logger.Fields{Operation: GetattrFile, Path: file.AbsolutePath(), Error: err})
 			return err
 		}
 		// update the local cache
@@ -82,7 +83,7 @@ func (file *FileINode) Open(ctx context.Context, req *fuse.OpenRequest, resp *fu
 	file.lockFile()
 	defer file.unlockFile()
 
-	Logdebug("Opening file", Fields{Operation: Open, Path: file.AbsolutePath(), Flags: req.Flags, FileSize: file.Attrs.Size})
+	logger.Debug("Opening file", logger.Fields{Operation: Open, Path: file.AbsolutePath(), Flags: req.Flags, FileSize: file.Attrs.Size})
 	handle, err := file.NewFileHandle(true, req.Flags)
 	if err != nil {
 		return nil, err
@@ -132,7 +133,7 @@ func (file *FileINode) RemoveHandle(handle *FileHandle) {
 	if len(file.activeHandles) == 0 {
 		file.closeStaging()
 	} else {
-		Logtrace("Staging file is not closed.", file.logInfo(Fields{Operation: Close}))
+		logger.Trace("Staging file is not closed.", file.logInfo(logger.Fields{Operation: Close}))
 	}
 }
 
@@ -141,16 +142,16 @@ func (file *FileINode) closeStaging() {
 	if file.fileProxy != nil { // if not already closed
 		err := file.fileProxy.Close()
 		if err != nil {
-			Logerror("Failed to close staging file", file.logInfo(Fields{Operation: Close, Error: err}))
+			logger.Error("Failed to close staging file", file.logInfo(logger.Fields{Operation: Close, Error: err}))
 		}
 		file.fileProxy = nil
-		Loginfo("Staging file is closed", file.logInfo(Fields{Operation: Close}))
+		logger.Info("Staging file is closed", file.logInfo(logger.Fields{Operation: Close}))
 	}
 }
 
 // Responds to the FUSE Fsync request
 func (file *FileINode) Fsync(ctx context.Context, req *fuse.FsyncRequest) error {
-	Loginfo(fmt.Sprintf("Dispatching fsync request to all open handles: %d", len(file.activeHandles)), Fields{Operation: Fsync})
+	logger.Info(fmt.Sprintf("Dispatching fsync request to all open handles: %d", len(file.activeHandles)), logger.Fields{Operation: Fsync})
 	file.lockFile()
 	defer file.unlockFile()
 
@@ -166,7 +167,7 @@ func (file *FileINode) Fsync(ctx context.Context, req *fuse.FsyncRequest) error 
 
 // Invalidates metadata cache, so next ls or stat gives up-to-date file attributes
 func (file *FileINode) InvalidateMetadataCache() {
-	Logdebug("InvalidateMetadataCache ", file.logInfo(Fields{}))
+	logger.Debug("InvalidateMetadataCache ", file.logInfo(logger.Fields{}))
 	file.Attrs.Expires = file.FileSystem.Clock.Now().Add(-1 * time.Second)
 }
 
@@ -175,11 +176,11 @@ func (file *FileINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, re
 	file.lockFile()
 	defer file.unlockFile()
 
-	Logdebug("Setattr request received: ", Fields{Operation: Setattr})
+	logger.Debug("Setattr request received: ", logger.Fields{Operation: Setattr})
 
 	if req.Valid.Size() {
 		var err_out error = nil
-		Loginfo(fmt.Sprintf("Dispatching truncate request to all open handles: %d", len(file.activeHandles)), Fields{Operation: Setattr})
+		logger.Info(fmt.Sprintf("Dispatching truncate request to all open handles: %d", len(file.activeHandles)), logger.Fields{Operation: Setattr})
 		for _, handle := range file.activeHandles {
 			err := handle.Truncate(int64(req.Size))
 			if err != nil {
@@ -217,7 +218,7 @@ func (file *FileINode) Forget() {
 	file.lockFile()
 	defer file.unlockFile()
 	// ask parent to remove me from the children list
-	Logdebug(fmt.Sprintf("Forget for file %s", file.Attrs.Name), nil)
+	logger.Debug(fmt.Sprintf("Forget for file %s", file.Attrs.Name), nil)
 	file.Parent.removeChildInode(Forget, file.Attrs.Name)
 }
 
@@ -238,27 +239,27 @@ func (file *FileINode) createStagingFile(operation string, existsInDFS bool) (*o
 	if !existsInDFS { // it  is a new file so create it in the DFS
 		w, err := hdfsAccessor.CreateFile(absPath, file.Attrs.Mode, false)
 		if err != nil {
-			Logerror("Failed to create file in DFS", file.logInfo(Fields{Operation: operation, Error: err}))
+			logger.Error("Failed to create file in DFS", file.logInfo(logger.Fields{Operation: operation, Error: err}))
 			return nil, err
 		}
-		Loginfo("Created an empty file in DFS", file.logInfo(Fields{Operation: operation}))
+		logger.Info("Created an empty file in DFS", file.logInfo(logger.Fields{Operation: operation}))
 		w.Close()
 	} else {
 		// Request to write to existing file
 		_, err := hdfsAccessor.Stat(absPath)
 		if err != nil {
-			Logerror("Failed to stat file in DFS", file.logInfo(Fields{Operation: operation, Error: err}))
+			logger.Error("Failed to stat file in DFS", file.logInfo(logger.Fields{Operation: operation, Error: err}))
 			return nil, syscall.ENOENT
 		}
 	}
 
 	stagingFile, err := ioutil.TempFile(StagingDir, "stage")
 	if err != nil {
-		Logerror("Failed to create staging file", file.logInfo(Fields{Operation: operation, Error: err}))
+		logger.Error("Failed to create staging file", file.logInfo(logger.Fields{Operation: operation, Error: err}))
 		return nil, err
 	}
 	os.Remove(stagingFile.Name())
-	Loginfo("Created staging file", file.logInfo(Fields{Operation: operation, TmpFile: stagingFile.Name()}))
+	logger.Info("Created staging file", file.logInfo(logger.Fields{Operation: operation, TmpFile: stagingFile.Name()}))
 
 	if existsInDFS {
 		if err := file.downloadToStaging(stagingFile, operation); err != nil {
@@ -274,18 +275,18 @@ func (file *FileINode) downloadToStaging(stagingFile *os.File, operation string)
 
 	reader, err := hdfsAccessor.OpenRead(absPath)
 	if err != nil {
-		Logerror("Failed to open file in DFS", file.logInfo(Fields{Operation: operation, Error: err}))
+		logger.Error("Failed to open file in DFS", file.logInfo(logger.Fields{Operation: operation, Error: err}))
 		// TODO remove the staging file if there are no more active handles
 		return err
 	}
 
 	nc, err := io.Copy(stagingFile, reader)
 	if err != nil {
-		Logerror("Failed to copy content to staging file", file.logInfo(Fields{Operation: operation, Error: err}))
+		logger.Error("Failed to copy content to staging file", file.logInfo(logger.Fields{Operation: operation, Error: err}))
 		return err
 	}
 	reader.Close()
-	Loginfo(fmt.Sprintf("Downloaded a copy to stating dir. %d bytes copied", nc), file.logInfo(Fields{Operation: operation}))
+	logger.Info(fmt.Sprintf("Downloaded a copy to stating dir. %d bytes copied", nc), file.logInfo(logger.Fields{Operation: operation}))
 	return nil
 }
 
@@ -303,7 +304,7 @@ func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*F
 	if operation == Create {
 		// there must be no existing file handles for create operation
 		if file.fileProxy != nil {
-			Logpanic("Unexpected file state during creation", file.logInfo(Fields{Flags: flags}))
+			logger.Panic("Unexpected file state during creation", file.logInfo(logger.Fields{Flags: flags}))
 		}
 		if err := file.checkDiskSpace(); err != nil {
 			return nil, err
@@ -313,22 +314,22 @@ func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*F
 			return nil, err
 		}
 		fh.File.fileProxy = &LocalRWFileProxy{localFile: stagingFile, file: file}
-		Loginfo("Opened file, RW handle", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags}))
+		logger.Info("Opened file, RW handle", fh.logInfo(logger.Fields{Operation: operation, Flags: fh.fileFlags}))
 	} else {
 		if file.fileProxy != nil {
 			fh.File.fileProxy = file.fileProxy
-			Loginfo("Opened file, Returning existing handle", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags}))
+			logger.Info("Opened file, Returning existing handle", fh.logInfo(logger.Fields{Operation: operation, Flags: fh.fileFlags}))
 		} else {
 			// we alway open the file in RO mode. when the client writes to the file
 			// then we upgrade the handle. However, if the file is already opened in
 			// in RW state then we use the existing RW handle
 			reader, err := file.FileSystem.getDFSConnector().OpenRead(file.AbsolutePath())
 			if err != nil {
-				Logwarn("Opening file failed", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags, Error: err}))
+				logger.Warn("Opening file failed", fh.logInfo(logger.Fields{Operation: operation, Flags: fh.fileFlags, Error: err}))
 				return nil, err
 			} else {
 				fh.File.fileProxy = &RemoteROFileProxy{hdfsReader: reader, file: file}
-				Loginfo("Opened file, RO handle", fh.logInfo(Fields{Operation: operation, Flags: fh.fileFlags}))
+				logger.Info("Opened file, RO handle", fh.logInfo(logger.Fields{Operation: operation, Flags: fh.fileFlags}))
 			}
 		}
 	}
@@ -347,14 +348,14 @@ func (file *FileINode) upgradeHandleForWriting(me *FileHandle, operation string)
 	} else if _, ok := file.fileProxy.(*RemoteROFileProxy); ok {
 		upgrade = true
 	} else {
-		Logpanic("Unrecognized remote file proxy", nil)
+		logger.Panic("Unrecognized remote file proxy", nil)
 	}
 
 	if !upgrade {
 		return nil
 	} else {
 
-		Loginfo(fmt.Sprintf("Upgrading file handle for writing. Active handles %d", len(file.activeHandles)), file.logInfo(Fields{Operation: operation}))
+		logger.Info(fmt.Sprintf("Upgrading file handle for writing. Active handles %d", len(file.activeHandles)), file.logInfo(logger.Fields{Operation: operation}))
 
 		//lock n unlock all handles
 		for _, h := range file.activeHandles {
@@ -378,7 +379,7 @@ func (file *FileINode) upgradeHandleForWriting(me *FileHandle, operation string)
 		}
 
 		file.fileProxy = &LocalRWFileProxy{localFile: stagingFile, file: file}
-		Loginfo("Open handle upgrade to support RW ", file.logInfo(Fields{Operation: operation}))
+		logger.Info("Open handle upgrade to support RW ", file.logInfo(logger.Fields{Operation: operation}))
 		return nil
 	}
 }
@@ -399,8 +400,8 @@ func (file *FileINode) checkDiskSpace() error {
 	}
 }
 
-func (file *FileINode) logInfo(fields Fields) Fields {
-	f := Fields{Path: file.AbsolutePath()}
+func (file *FileINode) logInfo(fields logger.Fields) logger.Fields {
+	f := logger.Fields{Path: file.AbsolutePath()}
 	for k, e := range fields {
 		f[k] = e
 	}

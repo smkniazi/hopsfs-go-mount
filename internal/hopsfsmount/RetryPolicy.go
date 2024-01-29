@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"math/rand"
 	"time"
+
+	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 )
 
 // Encapsulats policy and logic of handling retries
@@ -68,7 +70,7 @@ func (op *Op) ShouldRetry(message string, args ...interface{}) bool {
 		diag = "exceeded max configured time interval for retries"
 	}
 	if diag != "" {
-		Logerror("Failed all retries.", Fields{Operation: RetryingPolicy, Message: fmt.Sprintf(message, args...), Retries: op.Attempt, Diag: diag})
+		logger.Error("Failed all retries.", logger.Fields{Operation: RetryingPolicy, Message: fmt.Sprintf(message, args...), Retries: op.Attempt, Diag: diag})
 		return false
 	}
 	// Computing delay (exponential backoff)
@@ -87,7 +89,7 @@ func (op *Op) ShouldRetry(message string, args ...interface{}) bool {
 	}
 
 	// Logging information about failed attempt
-	Logwarn("Failed try. Retrying", Fields{Operation: RetryingPolicy, Message: fmt.Sprintf(message, args...), Retries: op.Attempt, Delay: effectiveDelay})
+	logger.Warn("Failed try. Retrying", logger.Fields{Operation: RetryingPolicy, Message: fmt.Sprintf(message, args...), Retries: op.Attempt, Delay: effectiveDelay})
 	op.Attempt++
 
 	// Sleeping

@@ -334,20 +334,30 @@ func IsSuccessOrNonRetriableError(err error) bool {
 	return isNonRetriableError(unwrapAndTranslateError(err))
 }
 
+func isFuseOrSyscallError(err error) bool {
+	switch err.(type) {
+	case syscall.Errno:
+		return true
+	case *syscall.Errno:
+		return true
+	case fuse.Errno:
+		return true
+	case *fuse.Errno:
+		return true
+	}
+	return false
+}
+
 func unwrapAndTranslateError(err error) error {
 
-	if _, ok := err.(syscall.Errno); ok {
-		return err
-	}
-
-	if _, ok := err.(*syscall.Errno); ok {
+	if isFuseOrSyscallError(err) {
 		return err
 	}
 
 	e := err
 	if pathError, ok := err.(*os.PathError); ok {
 		e = pathError.Err
-		if _, ok := e.(*syscall.Errno); ok {
+		if isFuseOrSyscallError(e) {
 			return e
 		}
 	}

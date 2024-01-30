@@ -35,6 +35,9 @@ var _ fs.NodeMkdirer = (*DirINode)(nil)
 var _ fs.NodeRemover = (*DirINode)(nil)
 var _ fs.NodeRenamer = (*DirINode)(nil)
 var _ fs.NodeForgetter = (*DirINode)(nil)
+var _ fs.NodeSymlinker = (*DirINode)(nil)
+var _ fs.NodeReadlinker = (*DirINode)(nil)
+var _ fs.NodeLinker = (*DirINode)(nil)
 
 // Returns absolute path of the dir in HDFS namespace
 func (dir *DirINode) AbsolutePath() string {
@@ -306,11 +309,12 @@ func (dir *DirINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp
 	dir.lockMutex()
 	defer dir.unlockMutex()
 
-	if req.Valid.Size() {
-		return fmt.Errorf("unsupported operation. Can not set size of a directory")
-	}
-
 	path := dir.AbsolutePath()
+
+	if req.Valid.Size() {
+		logger.Error(fmt.Sprintf("Unsupported operation. Can not set size of a directory"), logger.Fields{Operation: Chmod, Path: path})
+		return syscall.ENOTSUP
+	}
 
 	if req.Valid.Mode() {
 		if err := ChmodOp(&dir.Attrs, dir.FileSystem, path, req, resp); err != nil {
@@ -356,4 +360,19 @@ func (dir *DirINode) lockChildrenMutex() {
 
 func (dir *DirINode) unlockChildrenMutex() {
 	dir.childrenMutex.Unlock()
+}
+
+func (dir *DirINode) Symlink(ctx context.Context, req *fuse.SymlinkRequest) (fs.Node, error) {
+	logger.Error("Unsupported Symlink operation.", logger.Fields{Operation: Symlink, Path: dir.AbsolutePath()})
+	return nil, syscall.ENOTSUP
+}
+
+func (dir *DirINode) Readlink(ctx context.Context, req *fuse.ReadlinkRequest) (string, error) {
+	logger.Error("Unsupported Readlink operation.", logger.Fields{Operation: ReadLink, Path: dir.AbsolutePath()})
+	return "", syscall.ENOTSUP
+}
+
+func (dir *DirINode) Link(ctx context.Context, req *fuse.LinkRequest, old fs.Node) (fs.Node, error) {
+	logger.Error("Unsupported Link operation.", logger.Fields{Operation: Link, Path: dir.AbsolutePath()})
+	return nil, syscall.ENOTSUP
 }

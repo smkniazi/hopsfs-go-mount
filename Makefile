@@ -11,7 +11,7 @@ VERSION=$(shell grep "VERSION" internal/hopsfsmount/Version.go | awk '{ print $$
 all: hopsfs-mount 
 
 hopsfs-mount:
-	go build -tags osusergo,netgo -ldflags="-w -X main.GITCOMMIT=${GITCOMMIT} -X main.BUILDTIME=${BUILDTIME} -X main.HOSTNAME=${HOSTNAME}" -o bin/hops-fuse-mount-${VERSION} ./cmd/main.go
+	go build -tags osusergo,netgo -ldflags="-w -X hopsworks.ai/hopsfsmount/internal/hopsfsmount.GITCOMMIT=${GITCOMMIT} -X hopsworks.ai/hopsfsmount/internal/hopsfsmount.BUILDTIME=${BUILDTIME} -X hopsworks.ai/hopsfsmount/internal/hopsfsmount.HOSTNAME=${HOSTNAME}" -o bin/hops-fuse-mount-${VERSION} ./cmd/main.go
 	chmod +x bin/hops-fuse-mount-${VERSION}
 
 clean:

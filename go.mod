@@ -1,4 +1,4 @@
-module logicalclocks.com/hopsfs-mount
+module hopsworks.ai/hopsfsmount
 
 go 1.15
 
@@ -9,6 +9,7 @@ require (
 	github.com/colinmarc/hdfs/v2 v2.2.0
 	github.com/go-git/go-git/v5 v5.5.2
 	github.com/golang/mock v1.6.0
+	github.com/kisielk/godepgraph v0.0.0-20221115040737-2d0831789458 // indirect
 	github.com/sirupsen/logrus v1.8.1
 	github.com/stretchr/testify v1.7.0
 	golang.org/x/net v0.2.0
@@ -18,6 +19,6 @@ require (
 
 replace github.com/colinmarc/hdfs/v2 v2.2.0 => github.com/logicalclocks/hopsfs-go-client/v2 v2.4.10
 
-//replace github.com/colinmarc/hdfs/v2 v2.2.0 => /home/salman/code/hops/hopsfs-go/hopsfs-go-client
+// replace github.com/colinmarc/hdfs/v2 v2.2.0 => /home/salman/code/hops/hopsfs-go/hopsfs-go-client
 
-//replace bazil.org/fuse v0.0.0-20200524192727-fb710f7dfd05 => /home/salman/code/hops/hopsfs-go/fuse
+//replace bazil.org/fuse v0.0.0-20230120002735-62a210ff1fd5 => /home/salman/code/hops/hopsfs-go/fuse

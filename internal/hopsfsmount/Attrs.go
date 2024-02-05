@@ -12,15 +12,17 @@ import (
 
 // Attributes common to the file/directory HDFS nodes
 type Attrs struct {
-	Inode   uint64
-	Name    string
-	Mode    os.FileMode
-	Size    uint64
-	Uid     uint32
-	Gid     uint32
-	Mtime   time.Time
-	Ctime   time.Time
-	Expires time.Time // indicates when cached attribute information expires
+	Inode        uint64
+	Name         string
+	Mode         os.FileMode
+	Size         uint64
+	Uid          uint32
+	Gid          uint32
+	DFSUserName  string
+	DFSGroupName string
+	Mtime        time.Time
+	Ctime        time.Time
+	Expires      time.Time // indicates when cached attribute information expires
 }
 
 // FsInfo provides information about HDFS

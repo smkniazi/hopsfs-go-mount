@@ -185,7 +185,7 @@ func (file *FileINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, re
 		}
 	}
 
-	if req.Valid.Uid() && req.Valid.Gid() {
+	if req.Valid.Uid() || req.Valid.Gid() {
 		if err := SetAttrChownOp(&file.Attrs, file.FileSystem, path, req, resp); err != nil {
 			return err
 		}

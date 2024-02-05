@@ -7,6 +7,8 @@ GITCOMMIT=`git rev-parse --short HEAD`
 BUILDTIME=`date +%FT%T%z`
 HOSTNAME=`hostname`
 VERSION=$(shell grep "VERSION" internal/hopsfsmount/Version.go | awk '{ print $$3 }' | tr -d \")
+TEST?=Test
+TEST_PACKAGE?=./...
 
 all: hopsfs-mount 
 
@@ -24,7 +26,9 @@ mock_%_test.go: %.go
 mock: hopsfs-mount \
 	internal/hopsfsmount/mock_HdfsAccessor_test.go \
 	internal/hopsfsmount/mock_ReadSeekCloser_test.go \
-	internal/hopsfsmount/mock_HdfsWriter_test.go
+	internal/hopsfsmount/mock_HdfsWriter_test.go \
+	internal/hopsfsmount/mock_FaultTolerantHdfsAccessor_test.go
 
 test: mock 
-	go test -p 1 -v -coverprofile coverage.txt -covermode atomic ./...
+	go clean -testcache
+	go test -v -p 1 -run $(TEST) -coverprofile coverage.txt `go list $(TEST_PACKAGE) | grep -v cmd`

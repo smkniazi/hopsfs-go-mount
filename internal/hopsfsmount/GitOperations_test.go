@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/go-git/go-git/v5"
@@ -23,27 +24,47 @@ func TestGitClone(t *testing.T) {
 
 		cloneDir := "cloneDir"
 		fullPath := filepath.Join(mountPoint, cloneDir)
-
-		//delete the dir if it already exists
-		_, err := os.Stat(fullPath)
-		if os.IsExist(err) {
-			err := rmDir(t, fullPath)
-			if err != nil {
-				t.Errorf("Faile to remove  %s. Error: %v", fullPath, err)
-			}
-		}
-
-		_, err = exec.Command("git", "clone", "https://github.com/logicalclocks/ndb-chef", fullPath).Output()
-		if err != nil {
-			t.Errorf("Unable to clone the repo. Error: %v", err)
-		}
-
-		//clean
-		err = rmDir(t, fullPath)
-		if err != nil {
-			t.Errorf("Faile to remove  %s. Error: %v", fullPath, err)
-		}
+		cloneTestInternel(t, fullPath, nil)
 	})
+}
+
+func TestGitCloneMT(t *testing.T) {
+	withMount(t, "/", func(mountPoint string, hdfsAccessor HdfsAccessor) {
+		clonePath1 := filepath.Join(mountPoint, "cloneDir1")
+		clonePath2 := filepath.Join(mountPoint, "cloneDir2")
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go cloneTestInternel(t, clonePath1, &wg)
+		go cloneTestInternel(t, clonePath2, &wg)
+		wg.Wait()
+	})
+}
+
+func cloneTestInternel(t *testing.T, clonePath string, wg *sync.WaitGroup) {
+	//delete the dir if it already exists
+	_, err := os.Stat(clonePath)
+	if os.IsExist(err) {
+		err := rmDir(t, clonePath)
+		if err != nil {
+			t.Errorf("Faile to remove  %s. Error: %v", clonePath, err)
+		}
+	}
+
+	_, err = exec.Command("git", "clone", "https://github.com/logicalclocks/ndb-chef", clonePath).Output()
+	if err != nil {
+		t.Errorf("Unable to clone the repo. Error: %v", err)
+	}
+
+	//clean
+	err = rmDir(t, clonePath)
+	if err != nil {
+		t.Errorf("Faile to remove  %s. Error: %v", clonePath, err)
+	}
+
+	if wg != nil {
+		wg.Done()
+	}
 }
 
 func TestGit2(t *testing.T) {

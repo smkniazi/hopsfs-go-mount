@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -54,7 +55,9 @@ func TestSimple(t *testing.T) {
 			testFile := filepath.Join(mountPoint, fmt.Sprintf("somefile_%d", i))
 			os.Remove(testFile)
 			logger.Info(fmt.Sprintf("New file: %s", testFile), nil)
-			createFile(t, testFile, "some data")
+			if err := createFile(testFile, "some data"); err != nil {
+				t.Fatalf("Failed to write %v", err)
+			}
 			os.Remove(testFile)
 		}
 	})
@@ -70,7 +73,9 @@ func TestTruncate(t *testing.T) {
 		logger.Info(fmt.Sprintf("New file: %s", testFile), nil)
 		data1 := "123456790"
 		data2 := "abcde"
-		createFile(t, testFile, data1)
+		if err := createFile(testFile, data1); err != nil {
+			t.Fatalf("Failed to write %v", err)
+		}
 		fi, _ := os.Stat(testFile)
 		fileSize := fi.Size()
 
@@ -78,7 +83,9 @@ func TestTruncate(t *testing.T) {
 			t.Errorf("Invalid file size. Expecting: %d Got: %d", len(data1), fileSize)
 		}
 
-		createFile(t, testFile, data2) // truncates if file already exists
+		if err := createFile(testFile, data2); err != nil { // truncates if file already exists
+			t.Fatalf("Failed to write %v", err)
+		}
 		fi, _ = os.Stat(testFile)
 		fileSize = fi.Size()
 
@@ -156,7 +163,9 @@ func TestMultipleRWCllients(t *testing.T) {
 		testFile1 := filepath.Join(mountPoint, "somefile")
 		testFile2 := filepath.Join(mountPoint, "somefile.bak")
 		logger.Info(fmt.Sprintf("New file: %s", testFile1), nil)
-		createFile(t, testFile1, "initial data\nadsf\n")
+		if err := createFile(testFile1, "initial data\nadsf\n"); err != nil {
+			t.Fatalf("Failed to write %v", err)
+		}
 
 		c1, _ := os.OpenFile(testFile1, os.O_RDWR, 0600)
 		c2, _ := os.OpenFile(testFile1, os.O_RDWR, 0600)
@@ -200,7 +209,9 @@ func TestMountSubDir(t *testing.T) {
 			mkdir(t, dir)
 			for j := 0; j < filesPdir; j++ {
 				f := filepath.Join(dir, "file"+strconv.Itoa(j))
-				createFile(t, f, "initial data")
+				if err := createFile(f, "initial data"); err != nil {
+					t.Fatalf("Failed to write %v", err)
+				}
 			}
 		}
 
@@ -228,9 +239,16 @@ func TestMountSubDir(t *testing.T) {
 			dir := filepath.Join(mountPoint, "dir"+strconv.Itoa(i))
 			for j := 0; j < filesPdir; j++ {
 				f := filepath.Join(dir, "file"+strconv.Itoa(j))
-				rmFile(t, f)
+				err := rmFile(f)
+				if err != nil {
+					t.Fatalf("Deleting file failed %s, Error: %v", f, err)
+				}
 			}
-			rmFile(t, dir)
+			err := rmFile(dir)
+			if err != nil {
+				t.Fatalf("Deleting file failed %s, Error: %v", dir, err)
+			}
+
 		}
 	})
 }
@@ -418,13 +436,101 @@ func testSeeks(t *testing.T, client *hdfs.Client, diskTestFile string, dfsTestFi
 	}
 }
 
+func TestMultipleMountPoints(t *testing.T) {
+
+	//clean up old runs
+	withMount(t, "/", func(mountPoint string, hdfsAccessor HdfsAccessor) {
+		testFile := filepath.Join(mountPoint, "somefile")
+		rmFile(testFile)
+	})
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	times := 5
+
+	// read, delete, write
+	work := func(id int, testFile string) error {
+
+		for i := 0; i < times; i++ {
+			logger.Info(fmt.Sprintf("_____ Thread: %d. Try %d _____", id, i), nil)
+
+			var data string
+			var err error
+			data, err = readFile(t, testFile)
+			if err != nil {
+				logger.Info(fmt.Sprintf("_____ Thread: %d.  Error while reading", id), logger.Fields{Error: err, ID: id, Path: testFile})
+			}
+
+			if data == "" {
+				data = fmt.Sprintf("Test data. failed to read after try: %d", i)
+			}
+
+			err = rmFile(testFile)
+			if err != nil {
+				logger.Info(fmt.Sprintf("_____ Thread: %d. Deleting file failed ", id), logger.Fields{Error: err, ID: id, Path: testFile})
+			}
+
+			err = createFile(testFile, data)
+			if err != nil {
+				logger.Info(fmt.Sprintf("_____ Thread: %d. Error while saving file", id), logger.Fields{Error: err, ID: id, Path: testFile})
+			}
+		}
+
+		logger.Info(fmt.Sprintf("_____ Thread: %d. Done  _____", id), nil)
+		return nil
+	}
+
+	go withMount(t, "/", func(mountPoint string, hdfsAccessor HdfsAccessor) {
+		testFile := filepath.Join(mountPoint, "somefile")
+		work(0, testFile)
+		wg.Done()
+	})
+
+	go withMount(t, "/", func(mountPoint string, hdfsAccessor HdfsAccessor) {
+		testFile := filepath.Join(mountPoint, "somefile")
+		work(1, testFile)
+		wg.Done()
+	})
+
+	wg.Wait()
+
+	// the file must exist
+	withMount(t, "/", func(mountPoint string, hdfsAccessor HdfsAccessor) {
+		testFile := filepath.Join(mountPoint, "somefile")
+		logger.Info("Checking and Cleaing up", logger.Fields{Path: testFile})
+
+		data, err := readFile(t, testFile)
+		if err != nil {
+			logger.Info("Error while reading", logger.Fields{Error: err, Path: testFile})
+			t.Fatalf("Error while reading, %v", err)
+		}
+		logger.Info(fmt.Sprintf("Checking and Cleaing up. Data Read: %s", data),
+			logger.Fields{Path: testFile})
+
+		if data == "" {
+			// unexpected. fail
+			logger.Info("Error while reading. Expected to read some data", logger.Fields{Error: err, Path: testFile})
+			t.Fatalf("Error while reading, %v", err)
+		}
+
+		// clean up
+		err = rmFile(testFile)
+		if err != nil {
+			logger.Info("Error while deleting", logger.Fields{Error: err, Path: testFile})
+			t.Fatalf("Error while deleting, %v", err)
+		}
+
+	})
+}
+
 func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor HdfsAccessor)) {
 	t.Helper()
 
 	// Wrapping with FaultTolerantHdfsAccessor
 	retryPolicy := NewDefaultRetryPolicy(WallClock{})
 	retryPolicy.MaxAttempts = 1 // for quick failure
-	logger.InitLogger("INFO", false, "")
+	logger.InitLogger("DEBUG", false, "")
 	hdfsAccessor, _ := NewHdfsAccessor("localhost:8020", WallClock{}, TLSConfig{TLS: false, RootCABundle: RootCABundle, ClientCertificate: ClientCertificate, ClientKey: ClientKey})
 	err := hdfsAccessor.EnsureConnected()
 	if err != nil {
@@ -463,14 +569,23 @@ func mkdir(t testing.TB, dir string) {
 
 }
 
-func createFile(t testing.TB, filePath string, data string) {
-	t.Helper()
+func createFile(filePath string, data string) error {
 	out, err := os.Create(filePath)
 	if err != nil {
-		t.Errorf("Faile to create test file %s. Error: %v", filePath, err)
+		return err
 	}
 	out.WriteString(data)
 	out.Close()
+	return nil
+}
+
+func readFile(t testing.TB, filePath string) (string, error) {
+	t.Helper()
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", err
+	}
+	return string(data[:]), nil
 }
 
 func listDir(t testing.TB, dir string) []fs.FileInfo {
@@ -482,12 +597,8 @@ func listDir(t testing.TB, dir string) []fs.FileInfo {
 	return content
 }
 
-func rmFile(t testing.TB, path string) {
-	t.Helper()
-	err := os.Remove(path)
-	if err != nil {
-		t.Errorf("Faile to remove  %s. Error: %v", path, err)
-	}
+func rmFile(path string) error {
+	return os.Remove(path)
 }
 
 func rmDir(t testing.TB, dir string) error {
@@ -530,7 +641,8 @@ func rmDir(t testing.TB, dir string) error {
 // See HOPSFS-5 for more details
 func disablePolling(rootDir string) {
 
-	filePath := fmt.Sprintf("%s/__file_to_diable_polling__", rootDir)
+	r := rand.New(rand.NewSource(int64(time.Now().Local().Nanosecond())))
+	filePath := fmt.Sprintf("%s/__file_to_diable_polling__%d__", rootDir, r.Int())
 	file, err := os.Create(filePath)
 	if err != nil {
 		logger.Error(fmt.Sprintf("Error opening file: %v", err), nil)
@@ -558,7 +670,7 @@ func disablePolling(rootDir string) {
 		return
 	}
 
-	fmt.Printf("Polling file %s...\n", filePath)
+	logger.Info(fmt.Sprintf("Polling file %s...\n", filePath), nil)
 
 	events := make([]unix.EpollEvent, 1)
 	n, err := unix.EpollWait(epollFd, events, 1000)

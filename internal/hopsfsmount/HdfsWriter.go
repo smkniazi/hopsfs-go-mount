@@ -3,9 +3,10 @@
 package hopsfsmount
 
 import (
-	"errors"
+	"syscall"
 
 	"github.com/colinmarc/hdfs/v2"
+	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 )
 
 // Allows to open HDFS file as a seekable/flushable/truncatable write-only stream
@@ -31,25 +32,29 @@ func NewHdfsWriter(backendWriter *hdfs.FileWriter) HdfsWriter {
 
 // Seeks to a given position
 func (w *hdfsWriterImpl) Seek(pos int64) error {
-	return errors.New("Seek is not implemented")
+	logger.Error("Seek is not implemented", nil)
+	return syscall.ENOSYS
 }
 
 // Writes chunk of data
 func (w *hdfsWriterImpl) Write(buffer []byte) (int, error) {
-	return w.BackendWriter.Write(buffer)
+	written, err := w.BackendWriter.Write(buffer)
+	return written, unwrapAndTranslateError(err)
 }
 
 // Flushes all the data
 func (w *hdfsWriterImpl) Flush() error {
-	return errors.New("Flush is not implemented")
+	logger.Error("Flush is not implemented", nil)
+	return syscall.ENOSYS
 }
 
 // Closes the stream
 func (w *hdfsWriterImpl) Truncate() error {
-	return errors.New("Truncate is not implemented")
+	logger.Error("Truncate is not implemented", nil)
+	return syscall.ENOSYS
 }
 
 // Truncate the HDFS file at a given position
 func (w *hdfsWriterImpl) Close() error {
-	return w.BackendWriter.Close()
+	return unwrapAndTranslateError(w.BackendWriter.Close())
 }

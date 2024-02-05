@@ -302,15 +302,17 @@ func (dfs *HdfsAccessorImpl) attrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 	}
 
 	return Attrs{
-		Inode:   fi.FileId(),
-		Name:    fileInfo.Name(),
-		Mode:    mode,
-		Size:    fi.Length(),
-		Uid:     uid,
-		Mtime:   modificationTime,
-		Ctime:   modificationTime,
-		Gid:     gid,
-		Expires: dfs.Clock.Now().Add(STAT_CACHE_TIME),
+		Inode:        fi.FileId(),
+		Name:         fileInfo.Name(),
+		Mode:         mode,
+		Size:         fi.Length(),
+		Uid:          uid,
+		Gid:          gid,
+		DFSUserName:  fi.Owner(),
+		DFSGroupName: fi.OwnerGroup(),
+		Mtime:        modificationTime,
+		Ctime:        modificationTime,
+		Expires:      dfs.Clock.Now().Add(STAT_CACHE_TIME),
 	}
 }
 

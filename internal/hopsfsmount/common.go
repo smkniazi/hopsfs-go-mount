@@ -26,25 +26,26 @@ func ChmodOp(attrs *Attrs, fileSystem *FileSystem, path string, req *fuse.Setatt
 
 func SetAttrChownOp(attrs *Attrs, fileSystem *FileSystem, path string, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
 
-	if !req.Valid.Gid() || !req.Valid.Uid() {
-		return syscall.ENOENT
+	var userName = attrs.DFSUserName
+	var groupName = attrs.DFSGroupName
+	var err error
+
+	if req.Valid.Uid() {
+		userName, err = getUserName(req.Uid)
+		if err != nil {
+			logger.Error("Unable to find user information. ", logger.Fields{Operation: Setattr,
+				Path: path, UID: req.Uid, HopsFSUserName: ForceOverrideUsername})
+			return err
+		}
 	}
 
-	uid := req.Uid
-	gid := req.Gid
-
-	userName, err := getUserName(uid)
-	if err != nil {
-		logger.Error("Unable to find user information. ", logger.Fields{Operation: Setattr,
-			Path: path, UID: req.Uid, HopsFSUserName: ForceOverrideUsername})
-		return err
-	}
-
-	groupName, err := getGrupName(path, gid)
-	if err != nil {
-		logger.Error("Unable to find group information. ", logger.Fields{Operation: Setattr,
-			Path: path, GID: req.Gid, GetGroupFromHopsFSDatasetPath: UseGroupFromHopsFsDatasetPath})
-		return err
+	if req.Valid.Gid() {
+		groupName, err = getGrupName(path, req.Gid)
+		if err != nil {
+			logger.Error("Unable to find group information. ", logger.Fields{Operation: Setattr,
+				Path: path, GID: req.Gid, GetGroupFromHopsFSDatasetPath: UseGroupFromHopsFsDatasetPath})
+			return err
+		}
 	}
 
 	err = ChownOp(fileSystem, path, userName, groupName)
@@ -52,20 +53,21 @@ func SetAttrChownOp(attrs *Attrs, fileSystem *FileSystem, path string, req *fuse
 		return err
 	}
 
-	attrs.Uid = uid
-	attrs.Gid = gid
+	if req.Valid.Uid() {
+		attrs.Uid = req.Uid
+		attrs.DFSUserName = userName
+	}
+
+	if req.Valid.Gid() {
+		attrs.Gid = req.Gid
+		attrs.DFSGroupName = groupName
+	}
 	return nil
 }
 
 func ChownOp(fileSystem *FileSystem, path string, userName string, groupName string) error {
-
 	logger.Info("Setting attributes", logger.Fields{Operation: Chown, Path: path, User: userName, Group: groupName})
-	err := fileSystem.getDFSConnector().Chown(path, userName, groupName)
-
-	if err != nil {
-		return err
-	}
-	return nil
+	return fileSystem.getDFSConnector().Chown(path, userName, groupName)
 }
 
 func getUserName(uid uint32) (string, error) {

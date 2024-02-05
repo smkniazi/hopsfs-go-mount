@@ -350,6 +350,10 @@ func isFuseOrSyscallError(err error) bool {
 
 func unwrapAndTranslateError(err error) error {
 
+	if err == nil {
+		return err
+	}
+
 	if isFuseOrSyscallError(err) {
 		return err
 	}

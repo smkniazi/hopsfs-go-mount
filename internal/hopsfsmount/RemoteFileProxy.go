@@ -3,9 +3,8 @@
 package hopsfsmount
 
 import (
-	"errors"
 	"io"
-	"os"
+	"syscall"
 
 	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 )
@@ -38,7 +37,8 @@ func (p *RemoteROFileProxy) ReadAt(b []byte, off int64) (int, error) {
 	logger.Debug("RemoteFileProxy ReadAt", p.file.logInfo(logger.Fields{Operation: Read, Offset: off}))
 
 	if off < 0 {
-		return 0, &os.PathError{Op: "readat", Path: p.file.AbsolutePath(), Err: errors.New("negative offset")}
+		logger.Error("WriteAt. Negative offset", logger.Fields{Path: p.file.AbsolutePath()})
+		return 0, syscall.EINVAL
 	}
 	maxBytesToRead := len(b)
 

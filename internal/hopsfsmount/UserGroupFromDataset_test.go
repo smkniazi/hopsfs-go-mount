@@ -47,16 +47,16 @@ func TestGetGroupFromDatasetPath(t *testing.T) {
 
 		for _, tc := range cases {
 			t.Run(fmt.Sprintf("%s path %v", tc.Name, tc.Path), func(t *testing.T) {
-				groupFromPath, err := getGroupNameFromPath(tc.Path)
+				groupFromPath := getGroupNameFromPath(tc.Path)
 				if tc.IsCorrectPath {
-					if err != nil {
-						t.Errorf("Error returned for  correct path: %v: ", tc.Path)
+					if groupFromPath == "" {
+						t.Errorf("Error failed to find group name from path: %v: ", tc.Path)
 					} else if groupFromPath != expectedPath {
 						t.Errorf("Returned wrong group from path: %v: got %v", tc.Path, groupFromPath)
 					}
 				} else {
-					if err == nil {
-						t.Errorf("Expected error from wrong path: %v: but got %v", tc.Path, groupFromPath)
+					if groupFromPath != "" {
+						t.Errorf("Expected empty group from wrong path: %v: but got %v", tc.Path, groupFromPath)
 					}
 				}
 			})

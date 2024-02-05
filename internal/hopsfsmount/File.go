@@ -40,9 +40,6 @@ var _ fs.NodeFsyncer = (*FileINode)(nil)
 var _ fs.NodeSetattrer = (*FileINode)(nil)
 var _ fs.NodeForgetter = (*FileINode)(nil)
 
-// File is also a factory for ReadSeekCloser objects
-var _ ReadSeekCloserFactory = (*FileINode)(nil)
-
 // Retuns absolute path of the file in HDFS namespace
 func (file *FileINode) AbsolutePath() string {
 	return path.Join(file.Parent.AbsolutePath(), file.Attrs.Name)
@@ -93,18 +90,6 @@ func (file *FileINode) Open(ctx context.Context, req *fuse.OpenRequest, resp *fu
 
 	file.AddHandle(handle)
 	return handle, nil
-}
-
-// Opens file for reading
-func (file *FileINode) OpenRead() (ReadSeekCloser, error) {
-	file.lockFile()
-	defer file.unlockFile()
-
-	handle, err := file.Open(nil, &fuse.OpenRequest{Flags: fuse.OpenReadOnly}, nil)
-	if err != nil {
-		return nil, err
-	}
-	return NewFileHandleAsReadSeekCloser(handle.(*FileHandle)), nil
 }
 
 // Registers an opened file handle
@@ -200,7 +185,7 @@ func (file *FileINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, re
 		}
 	}
 
-	if req.Valid.Uid() || req.Valid.Gid() {
+	if req.Valid.Uid() && req.Valid.Gid() {
 		if err := SetAttrChownOp(&file.Attrs, file.FileSystem, path, req, resp); err != nil {
 			return err
 		}

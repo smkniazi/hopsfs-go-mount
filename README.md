@@ -49,6 +49,3 @@ Options:
         Enables tls connections
 ```
 
-Other Platforms
----------------
-It should be relatively easy to enable this working on MacOS and FreeBSD, since all underlying dependencies are MacOS and FreeBSD-ready. Very few changes are needed to the code to get it working on those platforms, but it is currently not a priority for authors. Contact authors if you want to help.

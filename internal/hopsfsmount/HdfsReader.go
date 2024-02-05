@@ -3,9 +3,11 @@
 package hopsfsmount
 
 import (
-	"errors"
+	"fmt"
+	"syscall"
 
 	"github.com/colinmarc/hdfs/v2"
+	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 )
 
 // Allows to open an HDFS file as a seekable read-only stream
@@ -30,10 +32,12 @@ func (hr *HdfsReader) Read(buffer []byte) (int, error) {
 func (hr *HdfsReader) Seek(pos int64) error {
 	actualPos, err := hr.BackendReader.Seek(pos, 0)
 	if err != nil {
-		return err
+		return unwrapAndTranslateError(err)
 	}
 	if pos != actualPos {
-		return errors.New("Can't seek to requested position")
+		logger.Error(fmt.Sprintf("Can't seek to requested position. Req Pos: %d", pos),
+			logger.Fields{Path: hr.BackendReader.Name()})
+		return syscall.EINVAL
 	}
 	return nil
 }
@@ -42,12 +46,12 @@ func (hr *HdfsReader) Seek(pos int64) error {
 func (hr *HdfsReader) Position() (int64, error) {
 	actualPos, err := hr.BackendReader.Seek(0, 1)
 	if err != nil {
-		return 0, err
+		return 0, unwrapAndTranslateError(err)
 	}
 	return actualPos, nil
 }
 
 // Closes the stream
 func (hr *HdfsReader) Close() error {
-	return hr.BackendReader.Close()
+	return unwrapAndTranslateError(hr.BackendReader.Close())
 }

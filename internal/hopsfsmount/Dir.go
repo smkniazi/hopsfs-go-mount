@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"path/filepath"
 	"sync"
 	"syscall"
 
@@ -38,6 +37,7 @@ var _ fs.NodeForgetter = (*DirINode)(nil)
 var _ fs.NodeSymlinker = (*DirINode)(nil)
 var _ fs.NodeReadlinker = (*DirINode)(nil)
 var _ fs.NodeLinker = (*DirINode)(nil)
+var _ fs.NodeCreater = (*DirINode)(nil)
 
 // Returns absolute path of the dir in HDFS namespace
 func (dir *DirINode) AbsolutePath() string {
@@ -50,11 +50,7 @@ func (dir *DirINode) AbsolutePath() string {
 
 // Returns absolute path of the child item of this directory
 func (dir *DirINode) AbsolutePathForChild(name string) string {
-	path := dir.AbsolutePath()
-	if path != "/" {
-		path = path + "/"
-	}
-	return path + filepath.Base(name)
+	return path.Join(dir.AbsolutePath(), name)
 }
 
 // Responds on FUSE request to get directory attributes
@@ -206,20 +202,39 @@ func (dir *DirINode) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node
 	dir.lockMutex()
 	defer dir.unlockMutex()
 
-	err := dir.FileSystem.getDFSConnector().Mkdir(dir.AbsolutePathForChild(req.Name), req.Mode)
+	// check user and group information first.
+	userName, err := getUserName(req.Uid)
+	if err != nil {
+		logger.Error("Unable to find user information. ", logger.Fields{Operation: Mkdir,
+			Path: dir.AbsolutePathForChild(req.Name), UID: req.Uid, HopsFSUserName: ForceOverrideUsername})
+		return nil, err
+	}
+
+	groupName, err := getGrupName(dir.AbsolutePathForChild(req.Name), req.Gid)
+	if err != nil {
+		logger.Error("Unable to find group information. ", logger.Fields{Operation: Mkdir,
+			Path: dir.AbsolutePathForChild(req.Name), GID: req.Gid,
+			GetGroupFromHopsFSDatasetPath: UseGroupFromHopsFsDatasetPath})
+		return nil, err
+	}
+
+	err = dir.FileSystem.getDFSConnector().Mkdir(dir.AbsolutePathForChild(req.Name), req.Mode)
 	if err != nil {
 		logger.Info("mkdir failed", logger.Fields{Operation: Mkdir, Path: path.Join(dir.AbsolutePath(), req.Name), Error: err})
 		return nil, err
 	}
 	logger.Debug("mkdir successful", logger.Fields{Operation: Mkdir, Path: path.Join(dir.AbsolutePath(), req.Name)})
 
-	err = ChownOp(&dir.Attrs, dir.FileSystem, dir.AbsolutePathForChild(req.Name), req.Uid, req.Gid)
+	err = ChownOp(dir.FileSystem, dir.AbsolutePathForChild(req.Name), userName, groupName)
 	if err != nil {
 		logger.Warn("Unable to change ownership of new dir", logger.Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name),
 			UID: req.Uid, GID: req.Gid, Error: err})
 		//unable to change the ownership of the directory. so delete it as the operation as a whole failed
 		dir.FileSystem.getDFSConnector().Remove(dir.AbsolutePathForChild(req.Name))
 		return nil, err
+	} else {
+		dir.Attrs.Uid = req.Uid
+		dir.Attrs.Gid = req.Gid
 	}
 
 	newInode := dir.addOrUpdateChildInodeAttrs(Mkdir, req.Name, Attrs{Name: req.Name, Mode: req.Mode | os.ModeDir, Uid: req.Uid, Gid: req.Gid})
@@ -232,6 +247,23 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 	defer dir.unlockMutex()
 
 	logger.Info("Creating a new file", logger.Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags})
+
+	// first determine the usename and grup name for the new file
+	userName, err := getUserName(req.Uid)
+	if err != nil {
+		logger.Error("Unable to find user information. ", logger.Fields{Operation: Create,
+			Path: dir.AbsolutePathForChild(req.Name), UID: req.Uid, HopsFSUserName: ForceOverrideUsername})
+		return nil, nil, err
+	}
+
+	groupName, err := getGrupName(dir.AbsolutePathForChild(req.Name), req.Gid)
+	if err != nil {
+		logger.Error("Unable to find group information. ", logger.Fields{Operation: Create,
+			Path: dir.AbsolutePathForChild(req.Name), GID: req.Gid,
+			GetGroupFromHopsFSDatasetPath: UseGroupFromHopsFsDatasetPath})
+		return nil, nil, err
+	}
+
 	file := (dir.addOrUpdateChildInodeAttrs(Create, req.Name, Attrs{Name: req.Name, Mode: req.Mode})).(*FileINode)
 	handle, err := file.NewFileHandle(false, req.Flags)
 	if err != nil {
@@ -241,7 +273,7 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 	}
 
 	file.AddHandle(handle)
-	err = ChownOp(&dir.Attrs, dir.FileSystem, dir.AbsolutePathForChild(req.Name), req.Uid, req.Gid)
+	err = ChownOp(dir.FileSystem, dir.AbsolutePathForChild(req.Name), userName, groupName)
 	if err != nil {
 		logger.Warn("Unable to change ownership of new file", logger.Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name),
 			UID: req.Uid, GID: req.Gid, Error: err})
@@ -249,6 +281,9 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 		dir.FileSystem.getDFSConnector().Remove(dir.AbsolutePathForChild(req.Name))
 		dir.removeChildInode(Create, req.Name)
 		return nil, nil, err
+	} else {
+		dir.Attrs.Uid = req.Uid
+		dir.Attrs.Gid = req.Gid
 	}
 
 	//update the attributes of the file now
@@ -267,10 +302,11 @@ func (dir *DirINode) Remove(ctx context.Context, req *fuse.RemoveRequest) error 
 	defer dir.unlockMutex()
 
 	path := dir.AbsolutePathForChild(req.Name)
-	logger.Info("Removing path", logger.Fields{Operation: Remove, Path: path})
+	logger.Debug("Removing path", logger.Fields{Operation: Remove, Path: path})
 	err := dir.FileSystem.getDFSConnector().Remove(path)
 	if err == nil {
 		dir.removeChildInode(Remove, req.Name)
+		logger.Info("Removed path", logger.Fields{Operation: Remove, Path: path})
 	} else {
 		logger.Warn("Failed to remove path", logger.Fields{Operation: Remove, Path: path, Error: err})
 	}
@@ -278,12 +314,12 @@ func (dir *DirINode) Remove(ctx context.Context, req *fuse.RemoveRequest) error 
 }
 
 // Responds on FUSE Rename request
-func (dir *DirINode) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.Node) error {
+func (dir *DirINode) Rename(ctx context.Context, req *fuse.RenameRequest, newNode fs.Node) error {
 	dir.lockMutex()
 	defer dir.unlockMutex()
 
 	oldPath := dir.AbsolutePathForChild(req.OldName)
-	newPath := newDir.(*DirINode).AbsolutePathForChild(req.NewName)
+	newPath := newNode.(*DirINode).AbsolutePathForChild(req.NewName)
 	logger.Info("Renaming to "+newPath, logger.Fields{Operation: Rename, Path: oldPath})
 	err := dir.FileSystem.getDFSConnector().Rename(oldPath, newPath)
 	if err == nil {
@@ -291,12 +327,12 @@ func (dir *DirINode) Rename(ctx context.Context, req *fuse.RenameRequest, newDir
 		if node := dir.getChildInode(Rename, req.OldName); node != nil {
 			if fnode, ok := (node).(*FileINode); ok {
 				fnode.Attrs.Name = req.NewName
-				fnode.Parent = newDir.(*DirINode)
-				newDir.(*DirINode).addOrUpdateChildInodeAttrs(Rename, req.NewName, fnode.Attrs)
+				fnode.Parent = newNode.(*DirINode)
+				newNode.(*DirINode).addOrUpdateChildInodeAttrs(Rename, req.NewName, fnode.Attrs)
 			} else if dnode, ok := (node).(*DirINode); ok {
 				dnode.Attrs.Name = req.NewName
-				dnode.Parent = newDir.(*DirINode)
-				newDir.(*DirINode).addOrUpdateChildInodeAttrs(Rename, req.NewName, dnode.Attrs)
+				dnode.Parent = newNode.(*DirINode)
+				newNode.(*DirINode).addOrUpdateChildInodeAttrs(Rename, req.NewName, dnode.Attrs)
 			}
 			dir.removeChildInode(Rename, req.OldName)
 		}
@@ -323,7 +359,7 @@ func (dir *DirINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp
 		}
 	}
 
-	if req.Valid.Uid() || req.Valid.Gid() {
+	if req.Valid.Uid() && req.Valid.Gid() {
 		if err := SetAttrChownOp(&dir.Attrs, dir.FileSystem, path, req, resp); err != nil {
 			logger.Warn("Setattr (chown/chgrp )failed", logger.Fields{Operation: Chmod, Path: path, UID: req.Uid, GID: req.Gid})
 			return err

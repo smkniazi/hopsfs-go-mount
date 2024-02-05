@@ -71,6 +71,7 @@ func (p *LocalRWFileProxy) Close() error {
 	return p.localFile.Close()
 }
 
+// TODO why there is a sync in File.go and also here
 func (p *LocalRWFileProxy) Sync() error {
 	p.file.lockFileHandles()
 	defer p.file.unlockFileHandles()

@@ -38,8 +38,7 @@ func (fta *FaultTolerantHdfsAccessor) OpenRead(path string) (ReadSeekCloser, err
 	for {
 		result, err := fta.Impl.OpenRead(path)
 		if err == nil {
-			// wrapping returned HdfsReader with FaultTolerantHdfsReader
-			return NewFaultTolerantHdfsReader(path, result, fta.Impl, fta.RetryPolicy), nil
+			return result, nil
 		}
 		if IsSuccessOrNonRetriableError(err) || !op.ShouldRetry("[%s] OpenRead: %s", path, err) {
 			return nil, err

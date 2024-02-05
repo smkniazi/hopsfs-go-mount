@@ -4,8 +4,7 @@
 package hopsfsmount
 
 import (
-	"errors"
-	"fmt"
+	"syscall"
 	"time"
 
 	"bazil.org/fuse"
@@ -26,57 +25,76 @@ func ChmodOp(attrs *Attrs, fileSystem *FileSystem, path string, req *fuse.Setatt
 }
 
 func SetAttrChownOp(attrs *Attrs, fileSystem *FileSystem, path string, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
-	var uid = attrs.Uid
-	var gid = attrs.Gid
 
-	if req.Valid.Uid() {
-		uid = req.Uid
+	if !req.Valid.Gid() || !req.Valid.Uid() {
+		return syscall.ENOENT
 	}
 
-	if req.Valid.Gid() {
-		gid = req.Gid
+	uid := req.Uid
+	gid := req.Gid
+
+	userName, err := getUserName(uid)
+	if err != nil {
+		logger.Error("Unable to find user information. ", logger.Fields{Operation: Setattr,
+			Path: path, UID: req.Uid, HopsFSUserName: ForceOverrideUsername})
+		return err
 	}
 
-	return ChownOp(attrs, fileSystem, path, uid, gid)
+	groupName, err := getGrupName(path, gid)
+	if err != nil {
+		logger.Error("Unable to find group information. ", logger.Fields{Operation: Setattr,
+			Path: path, GID: req.Gid, GetGroupFromHopsFSDatasetPath: UseGroupFromHopsFsDatasetPath})
+		return err
+	}
+
+	err = ChownOp(fileSystem, path, userName, groupName)
+	if err != nil {
+		return err
+	}
+
+	attrs.Uid = uid
+	attrs.Gid = gid
+	return nil
 }
 
-func ChownOp(attrs *Attrs, fileSystem *FileSystem, path string, uid uint32, gid uint32) error {
-	var userName = ""
-	var groupName = ""
+func ChownOp(fileSystem *FileSystem, path string, userName string, groupName string) error {
 
+	logger.Info("Setting attributes", logger.Fields{Operation: Chown, Path: path, User: userName, Group: groupName})
+	err := fileSystem.getDFSConnector().Chown(path, userName, groupName)
+
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func getUserName(uid uint32) (string, error) {
+	var userName = ""
 	if ForceOverrideUsername != "" {
 		userName = ForceOverrideUsername
 	} else {
 		userName = ugcache.LookupUserName(uid)
-		if userName == "" {
-			return fmt.Errorf(fmt.Sprintf("Setattr failed. Unable to find user information. Path %s", path))
-		}
 	}
 
+	if userName == "" {
+		return "", syscall.EACCES
+	}
+
+	return userName, nil
+}
+
+func getGrupName(path string, gid uint32) (string, error) {
+	var groupName string
 	if UseGroupFromHopsFsDatasetPath {
-		pathGroupName, err := getGroupNameFromPath(path)
-		if err == nil {
-			groupName = pathGroupName
-		} else {
-			logger.Warn(err.Error(), logger.Fields{Path: path})
-		}
+		groupName = getGroupNameFromPath(path)
 	} else {
 		groupName = ugcache.LookupGroupName(gid)
 	}
 
 	if groupName == "" {
-		return fmt.Errorf(fmt.Sprintf("Setattr failed. Unable to find group information. Path %s", path))
-	}
-
-	logger.Info("Setting attributes", logger.Fields{Operation: Chown, Path: path, UID: uid, User: userName, GID: gid, Group: groupName})
-	err := fileSystem.getDFSConnector().Chown(path, userName, groupName)
-
-	if err != nil {
-		return err
+		return "", syscall.EACCES
 	} else {
-		attrs.Uid = uid
-		attrs.Gid = gid
-		return nil
+		return groupName, nil
 	}
 }
 
@@ -110,12 +128,12 @@ func UpdateTS(attrs *Attrs, fileSystem *FileSystem, path string, req *fuse.Setat
 	return nil
 }
 
-func getGroupNameFromPath(path string) (string, error) {
-	logger.Info("Getting group name from path", logger.Fields{Path: path})
+func getGroupNameFromPath(path string) string {
+	logger.Debug("Getting group name from path", logger.Fields{Path: path})
 	result := HopfsProjectDatasetGroupRegex.FindAllStringSubmatch(path, -1)
 	if len(result) == 0 {
-		return "", errors.New("could not get project name and dataset name from path " + path)
+		return ""
 	}
 
-	return result[0][1] + "__" + result[0][2], nil
+	return result[0][1] + "__" + result[0][2]
 }

@@ -232,12 +232,17 @@ func (dir *DirINode) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node
 		//unable to change the ownership of the directory. so delete it as the operation as a whole failed
 		dir.FileSystem.getDFSConnector().Remove(dir.AbsolutePathForChild(req.Name))
 		return nil, err
-	} else {
-		dir.Attrs.Uid = req.Uid
-		dir.Attrs.Gid = req.Gid
 	}
 
-	newInode := dir.addOrUpdateChildInodeAttrs(Mkdir, req.Name, Attrs{Name: req.Name, Mode: req.Mode | os.ModeDir, Uid: req.Uid, Gid: req.Gid})
+	newInode := dir.addOrUpdateChildInodeAttrs(Mkdir, req.Name,
+		Attrs{
+			Name:         req.Name,
+			Mode:         req.Mode | os.ModeDir,
+			Uid:          req.Uid,
+			Gid:          req.Gid,
+			DFSUserName:  userName,
+			DFSGroupName: groupName,
+		})
 	return newInode, nil
 }
 
@@ -264,7 +269,16 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 		return nil, nil, err
 	}
 
-	file := (dir.addOrUpdateChildInodeAttrs(Create, req.Name, Attrs{Name: req.Name, Mode: req.Mode})).(*FileINode)
+	newFileAttrs := Attrs{
+		Name:         req.Name,
+		Mode:         req.Mode,
+		Uid:          req.Uid,
+		Gid:          req.Gid,
+		DFSUserName:  userName,
+		DFSGroupName: groupName,
+	}
+
+	file := (dir.addOrUpdateChildInodeAttrs(Create, req.Name, newFileAttrs)).(*FileINode)
 	handle, err := file.NewFileHandle(false, req.Flags)
 	if err != nil {
 		logger.Error("File creation failed", logger.Fields{Operation: Create, Path: dir.AbsolutePathForChild(req.Name), Mode: req.Mode, Flags: req.Flags, Error: err})
@@ -281,9 +295,6 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 		dir.FileSystem.getDFSConnector().Remove(dir.AbsolutePathForChild(req.Name))
 		dir.removeChildInode(Create, req.Name)
 		return nil, nil, err
-	} else {
-		dir.Attrs.Uid = req.Uid
-		dir.Attrs.Gid = req.Gid
 	}
 
 	//update the attributes of the file now
@@ -359,7 +370,7 @@ func (dir *DirINode) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp
 		}
 	}
 
-	if req.Valid.Uid() && req.Valid.Gid() {
+	if req.Valid.Uid() || req.Valid.Gid() {
 		if err := SetAttrChownOp(&dir.Attrs, dir.FileSystem, path, req, resp); err != nil {
 			logger.Warn("Setattr (chown/chgrp )failed", logger.Fields{Operation: Chmod, Path: path, UID: req.Uid, GID: req.Gid})
 			return err

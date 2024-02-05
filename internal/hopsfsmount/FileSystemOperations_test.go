@@ -292,6 +292,11 @@ func seekTest(t *testing.T, dataSize int, diskSeekTestFile string, dfsSeekTestFi
 
 	testSeeks(t, client, diskSeekTestFile, dfsSeekTestFile)
 
+	err = client.Remove(dfsSeekTestFile)
+	if err != nil {
+		t.Fatalf("Failed %v", err)
+	}
+
 }
 
 func prepare(t *testing.T, client *hdfs.Client, dataSize int, diskTestFile string, dfsTestFile string) {
@@ -530,7 +535,7 @@ func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor
 	// Wrapping with FaultTolerantHdfsAccessor
 	retryPolicy := NewDefaultRetryPolicy(WallClock{})
 	retryPolicy.MaxAttempts = 1 // for quick failure
-	logger.InitLogger("DEBUG", false, "")
+	logger.InitLogger("WARN", false, "")
 	hdfsAccessor, _ := NewHdfsAccessor("localhost:8020", WallClock{}, TLSConfig{TLS: false, RootCABundle: RootCABundle, ClientCertificate: ClientCertificate, ClientKey: ClientKey})
 	err := hdfsAccessor.EnsureConnected()
 	if err != nil {

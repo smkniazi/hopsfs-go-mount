@@ -312,7 +312,7 @@ func (dfs *HdfsAccessorImpl) attrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 		DFSGroupName: fi.OwnerGroup(),
 		Mtime:        modificationTime,
 		Ctime:        modificationTime,
-		Expires:      dfs.Clock.Now().Add(STAT_CACHE_TIME),
+		Expires:      dfs.Clock.Now().Add(CacheAttrsTimeDuration),
 	}
 }
 

@@ -180,7 +180,8 @@ func (fh *FileHandle) FlushAttempt(operation string) error {
 				logger.Error(fmt.Sprintf("Incorrect bytes read/written. Bytes reads %d, %d", nr, nw),
 					fh.logInfo(logger.Fields{Operation: operation, Error: err}))
 				w.Close()
-				return fmt.Errorf("incorrect bytes read/written. Bytes reads %d, %d", nr, nw)
+				logger.Error(fmt.Sprintf("incorrect bytes read/written. Bytes reads %d, %d", nr, nw), logger.Fields{Path: fh.File.AbsolutePath()})
+				return syscall.EIO
 			}
 
 			written += uint64(nw)

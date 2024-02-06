@@ -3,11 +3,13 @@
 package ugcache
 
 import (
-	"fmt"
 	"os/user"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
+
+	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 )
 
 const (
@@ -139,7 +141,8 @@ func LookupGroupName(gid uint32) string {
 func CurrentUserName() (string, error) {
 	u, err := user.Current()
 	if err != nil {
-		return "", fmt.Errorf("couldn't determine user: %s", err)
+		logger.Error("Couldn't determine current user", logger.Fields{"Error": err})
+		return "", syscall.EPERM
 	}
 	return u.Username, nil
 }

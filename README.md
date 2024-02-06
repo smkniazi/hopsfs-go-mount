@@ -11,24 +11,32 @@ Usage of ./hopsfs-mount:
   ./hopsfs-mount [Options] Namenode:Port MountPoint
 
 Options:
+  -allowOther
+        Allow other users to use the filesystem (default true)
   -allowedPrefixes string
         Comma-separated list of allowed path prefixes on the remote file system, if specified the mount point will expose access to those prefixes only (default "*")
+  -cacheAttrsTimeSecs int
+        Cache INodes' Attrs. Set to 0 to disable caching INode attrs. (default 5)
   -clientCertificate string
         Client certificate location (default "/srv/hops/super_crypto/hdfs/hdfs_certificate_bundle.pem")
   -clientKey string
         Client key location (default "/srv/hops/super_crypto/hdfs/hdfs_priv.pem")
+  -enablePageCache
+        Enable Linux Page Cache
   -fuse.debug
         log FUSE processing details
-  -getGroupFromPath
-    	Get the group from path. This will work if a hopsworks project is mounted
-  -hadoopUserName string
-    	Hadoop username        
+  -getGroupFromHopsFSDatasetPath
+        Get the group from hopsfs dataset path. This will work if a hopsworks project is mounted
+  -hopsFSUserName string
+        HopsFS username
   -lazy
         Allows to mount HopsFS filesystem before HopsFS is available
   -logFile string
         Log file path. By default the log is written to console
   -logLevel string
-        logs to be printed. error, warn, info, debug, trace (default "error")
+        logs to be printed. error, warn, info, debug, trace (default "info")
+  -numConnections int
+        Number of connections with the namenode (default 1)
   -readOnly
         Enables mount with readonly
   -retryMaxAttempts int
@@ -47,5 +55,7 @@ Options:
         stage directory for writing files (default "/tmp")
   -tls
         Enables tls connections
+  -version
+        Print version
 ```
 

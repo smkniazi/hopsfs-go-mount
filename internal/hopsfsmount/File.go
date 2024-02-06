@@ -85,7 +85,12 @@ func (file *FileINode) Open(ctx context.Context, req *fuse.OpenRequest, resp *fu
 	if err != nil {
 		return nil, err
 	}
-	resp.Flags = fuse.OpenDirectIO
+
+	// if page cache is not enabled then read directly from HopsFS
+	if !EnablePageCache {
+		resp.Flags = fuse.OpenDirectIO
+	}
+
 	resp.Handle = fuse.HandleID(handle.fhID)
 
 	file.AddHandle(handle)

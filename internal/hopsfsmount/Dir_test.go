@@ -22,7 +22,7 @@ func TestAttributeCaching(t *testing.T) {
 	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
 	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"*"}, false, NewDefaultRetryPolicy(mockClock), mockClock)
 	root, _ := fs.Root()
-	hdfsAccessor.EXPECT().Stat("/testDir").Return(Attrs{Name: "testDir", Mode: os.ModeDir | 0757, Expires: fs.Clock.Now().Add(STAT_CACHE_TIME)}, nil)
+	hdfsAccessor.EXPECT().Stat("/testDir").Return(Attrs{Name: "testDir", Mode: os.ModeDir | 0757, Expires: fs.Clock.Now().Add(CacheAttrsTimeDuration)}, nil)
 	dir, err := root.(*DirINode).Lookup(nil, "testDir")
 	assert.Nil(t, err)
 	// Second call to Lookup(), shouldn't re-issue Stat() on backend

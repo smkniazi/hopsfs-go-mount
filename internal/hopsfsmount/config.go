@@ -12,10 +12,7 @@ import (
 	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 )
 
-const (
-	STAT_CACHE_TIME = 5 * time.Second
-)
-
+var CacheAttrsTimeDuration = 5 * time.Second
 var StagingDir string = "/tmp"
 var MntSrcDir string = "/"
 var LogFile string = ""
@@ -33,6 +30,8 @@ var ForceOverrideUsername string = ""
 var UseGroupFromHopsFsDatasetPath bool = false
 var AllowOther bool = false
 var HopfsProjectDatasetGroupRegex = regexp.MustCompile(`/*Projects/(?P<projectName>\w+)/(?P<datasetName>\w+)/\/*`)
+var EnablePageCache = false
+var CacheAttrsTimeSecs = 5
 
 func ParseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.BoolVar(&LazyMount, "lazy", false, "Allows to mount HopsFS filesystem before HopsFS is available")
@@ -55,6 +54,8 @@ func ParseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.BoolVar(&UseGroupFromHopsFsDatasetPath, "getGroupFromHopsFSDatasetPath", false, "Get the group from hopsfs dataset path. This will work if a hopsworks project is mounted")
 	flag.BoolVar(&AllowOther, "allowOther", true, "Allow other users to use the filesystem")
 	flag.BoolVar(&Version, "version", false, "Print version")
+	flag.BoolVar(&EnablePageCache, "enablePageCache", false, "Enable Linux Page Cache")
+	flag.IntVar(&CacheAttrsTimeSecs, "cacheAttrsTimeSecs", 5, "Cache INodes' Attrs. Set to 0 to disable caching INode attrs.")
 
 	flag.Usage = usage
 	flag.Parse()
@@ -76,6 +77,12 @@ func ParseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 		log.Fatalf("Error creating log file. Error: %v", err)
 	}
 	logger.InitLogger(LogLevel, false, LogFile)
+
+	if CacheAttrsTimeSecs < 0 {
+		log.Fatalf("Invalid config. cacheAttrsTimeSecs can not be negative ")
+	} else {
+		CacheAttrsTimeDuration = time.Second * time.Duration(CacheAttrsTimeSecs)
+	}
 
 	logger.Info(fmt.Sprintf("Staging dir is:%s, Using TLS: %v, RetryAttempts: %d,  LogFile: %s", StagingDir, Tls, retryPolicy.MaxAttempts, LogFile), nil)
 	logger.Info(fmt.Sprintf("hopsfs-mount: current head GITCommit: %s Built time: %s Built by: %s ", GITCOMMIT, BUILDTIME, HOSTNAME), nil)
@@ -116,11 +123,15 @@ func usage() {
 func GetMountOptions(ro bool) []fuse.MountOption {
 	mountOptions := []fuse.MountOption{fuse.FSName("hopsfs"),
 		fuse.Subtype("hopsfs"),
-		// fuse.WritebackCache(), // write to kernel cache, improves performance for small writes.
-		// NOTE: It creates problem when reading file updated by external clients
-		// https://www.kernel.org/doc/Documentation/filesystems/fuse-io.txt
 		fuse.MaxReadahead(1024 * 64), //TODO: make configurable
 		fuse.DefaultPermissions(),
+	}
+
+	if EnablePageCache {
+		// https://www.kernel.org/doc/Documentation/filesystems/fuse-io.txt
+		logger.Warn("Linux page caches is enabled. "+
+			"It may cause problems in reading a file updated by external clients", nil)
+		mountOptions = append(mountOptions, fuse.WritebackCache())
 	}
 
 	if AllowOther {

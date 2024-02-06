@@ -111,7 +111,7 @@ func (dfs *HdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 		if hadoopUserName == "" {
 			currentSystemUser, err := ugcache.CurrentUserName()
 			if err != nil {
-				return nil, fmt.Errorf("couldn't determine user: %s", err)
+				return nil, err
 			}
 			hadoopUserName = currentSystemUser
 		}
@@ -189,7 +189,7 @@ func (dfs *HdfsAccessorImpl) CreateFile(path string, mode os.FileMode, overwrite
 
 	serverDefaults, err := dfs.MetadataClient.ServerDefaults()
 	if err != nil {
-		return nil, err
+		return nil, unwrapAndTranslateError(err)
 	}
 
 	writer, err := dfs.MetadataClient.CreateFile(path, serverDefaults.Replication, serverDefaults.BlockSize, mode, overwrite)
@@ -368,6 +368,10 @@ func unwrapAndTranslateError(err error) error {
 		}
 	}
 
+	if e == os.ErrInvalid {
+		return syscall.EINVAL
+	}
+
 	if e == os.ErrNotExist {
 		return syscall.ENOENT
 	}
@@ -423,12 +427,7 @@ func (dfs *HdfsAccessorImpl) Mkdir(path string, mode os.FileMode) error {
 		}
 	}
 	err := dfs.MetadataClient.Mkdir(path, mode)
-	if err != nil {
-		if strings.HasSuffix(err.Error(), "file already exists") {
-			return unwrapAndTranslateError(err)
-		}
-	}
-	return nil
+	return unwrapAndTranslateError(err)
 }
 
 // Removes file or directory
@@ -441,7 +440,8 @@ func (dfs *HdfsAccessorImpl) Remove(path string) error {
 			return unwrapAndTranslateError(err)
 		}
 	}
-	return dfs.MetadataClient.Remove(path)
+	err := dfs.MetadataClient.Remove(path)
+	return unwrapAndTranslateError(err)
 }
 
 // Renames file or directory
@@ -454,7 +454,8 @@ func (dfs *HdfsAccessorImpl) Rename(oldPath string, newPath string) error {
 			return unwrapAndTranslateError(err)
 		}
 	}
-	return dfs.MetadataClient.Rename(oldPath, newPath)
+	err := dfs.MetadataClient.Rename(oldPath, newPath)
+	return unwrapAndTranslateError(err)
 }
 
 // Changes the mode of the file
@@ -467,7 +468,8 @@ func (dfs *HdfsAccessorImpl) Chmod(path string, mode os.FileMode) error {
 			return unwrapAndTranslateError(err)
 		}
 	}
-	return dfs.MetadataClient.Chmod(path, mode)
+	err := dfs.MetadataClient.Chmod(path, mode)
+	return unwrapAndTranslateError(err)
 }
 
 // Changes the owner and group of the file
@@ -480,7 +482,8 @@ func (dfs *HdfsAccessorImpl) Chown(path string, user, group string) error {
 			return unwrapAndTranslateError(err)
 		}
 	}
-	return dfs.MetadataClient.Chown(path, user, group)
+	err := dfs.MetadataClient.Chown(path, user, group)
+	return unwrapAndTranslateError(err)
 }
 
 // Close current connection if needed

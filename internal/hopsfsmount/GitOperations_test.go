@@ -24,7 +24,7 @@ func TestGitClone(t *testing.T) {
 
 		cloneDir := "cloneDir"
 		fullPath := filepath.Join(mountPoint, cloneDir)
-		cloneTestInternel(t, fullPath, nil)
+		cloneTestInternal(t, fullPath, nil)
 	})
 }
 
@@ -35,13 +35,13 @@ func TestGitCloneMT(t *testing.T) {
 
 		var wg sync.WaitGroup
 		wg.Add(2)
-		go cloneTestInternel(t, clonePath1, &wg)
-		go cloneTestInternel(t, clonePath2, &wg)
+		go cloneTestInternal(t, clonePath1, &wg)
+		go cloneTestInternal(t, clonePath2, &wg)
 		wg.Wait()
 	})
 }
 
-func cloneTestInternel(t *testing.T, clonePath string, wg *sync.WaitGroup) {
+func cloneTestInternal(t *testing.T, clonePath string, wg *sync.WaitGroup) {
 	//delete the dir if it already exists
 	_, err := os.Stat(clonePath)
 	if os.IsExist(err) {

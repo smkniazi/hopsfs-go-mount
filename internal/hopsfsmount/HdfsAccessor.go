@@ -28,12 +28,14 @@ type HdfsAccessor interface {
 	OpenRead(path string) (ReadSeekCloser, error) // Opens HDFS file for reading
 	CreateFile(path string,
 		mode os.FileMode, overwrite bool) (HdfsWriter, error) // Opens HDFS file for writing
-	ReadDir(path string) ([]Attrs, error)         // Enumerates HDFS directory
-	Stat(path string) (Attrs, error)              // Retrieves file/directory attributes
-	StatFs() (FsInfo, error)                      // Retrieves HDFS usage
-	Mkdir(path string, mode os.FileMode) error    // Creates a directory
-	Remove(path string) error                     // Removes a file or directory
-	Rename(oldPath string, newPath string) error  // Renames a file or directory
+	ReadDir(path string) ([]Attrs, error)        // Enumerates HDFS directory
+	Stat(path string) (Attrs, error)             // Retrieves file/directory attributes
+	StatFs() (FsInfo, error)                     // Retrieves HDFS usage
+	Mkdir(path string, mode os.FileMode) error   // Creates a directory
+	Remove(path string) error                    // Removes a file or directory
+	Rename(oldPath string, newPath string) error // Renames a file or directory
+	Rename2(oldPath string, newPath string,
+		options hdfs.RenameOptions) error // Renames a file or directory
 	EnsureConnected() error                       // Ensures HDFS accessor is connected to the HDFS name node
 	Chown(path string, owner, group string) error // Changes the owner and group of the file
 	Chmod(path string, mode os.FileMode) error    // Changes the mode of the file
@@ -455,6 +457,20 @@ func (dfs *HdfsAccessorImpl) Rename(oldPath string, newPath string) error {
 		}
 	}
 	err := dfs.MetadataClient.Rename(oldPath, newPath)
+	return unwrapAndTranslateError(err)
+}
+
+// Renames file or directory with options
+func (dfs *HdfsAccessorImpl) Rename2(oldPath string, newPath string, options hdfs.RenameOptions) error {
+	dfs.lockHadoopClient()
+	defer dfs.unlockHadoopClient()
+
+	if dfs.MetadataClient == nil {
+		if err := dfs.connectMetadataClient(); err != nil {
+			return unwrapAndTranslateError(err)
+		}
+	}
+	err := dfs.MetadataClient.Rename2(oldPath, newPath, options)
 	return unwrapAndTranslateError(err)
 }
 

@@ -12,6 +12,7 @@ import (
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
+	"github.com/colinmarc/hdfs/v2"
 	"golang.org/x/net/context"
 	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
 )
@@ -351,57 +352,80 @@ func (srcParent *DirINode) Rename(ctx context.Context, req *fuse.RenameRequest, 
 	srcParent.lockMutex()
 	defer srcParent.unlockMutex()
 
-	oldPath := srcParent.AbsolutePathForChild(req.OldName)
-	newPath := dstParentDir.(*DirINode).AbsolutePathForChild(req.NewName)
-	logger.Debug("Renaming", logger.Fields{Operation: Rename, From: oldPath, To: newPath})
+	return srcParent.renameInt(Rename, req.OldName, req.NewName, dstParentDir, hdfs.RENAME_OPTION_NONE)
+}
 
-	srcInode, err := srcParent.LookupInt(Rename, req.OldName)
+func (srcParent *DirINode) renameInt(operationName, oldName, newName string, dstParentDir fs.Node, options hdfs.RenameOptions) error {
+	oldPath := srcParent.AbsolutePathForChild(oldName)
+	newPath := dstParentDir.(*DirINode).AbsolutePathForChild(newName)
+	logger.Debug("Renaming", logger.Fields{Operation: operationName, From: oldPath, To: newPath})
+
+	srcInode, err := srcParent.LookupInt(Rename, oldName)
 	if err != nil {
-		logger.Error("Rename failed. Src Inode not found", logger.Fields{Operation: Rename, From: oldPath, To: newPath})
+		logger.Error("Rename failed. Src Inode not found", logger.Fields{Operation: operationName, From: oldPath, To: newPath})
 		return err
 	}
 
-	dstInode, err := dstParentDir.(*DirINode).LookupInt(Rename, req.NewName)
+	dstInode, err := dstParentDir.(*DirINode).LookupInt(Rename, newName)
 	if err == nil {
-		logger.Debug("Rename. Dst Inode not found", logger.Fields{Operation: Rename, From: oldPath, To: newPath})
+		logger.Debug("Rename. Dst Inode not found", logger.Fields{Operation: operationName, From: oldPath, To: newPath})
 	}
 
 	// update backend
-	err = srcParent.FileSystem.getDFSConnector().Rename(oldPath, newPath)
+	err = srcParent.FileSystem.getDFSConnector().Rename2(oldPath, newPath, options)
 	if err != nil {
-		logger.Error("Rename failed at the backend", logger.Fields{Operation: Rename, From: oldPath, To: newPath, Error: err})
+		logger.Error("Rename failed at the backend", logger.Fields{Operation: operationName, From: oldPath, To: newPath, Error: err})
 		return err
 	}
 
 	// disconnect src inode
 	if srcInode != nil {
-		srcParent.removeChildInode(Rename, req.OldName)
+		srcParent.removeChildInode(Rename, oldName)
 	}
 
 	// disconnect dst inode
 	if dstInode != nil {
-		dstParentDir.(*DirINode).removeChildInode(Rename, req.NewName)
+		dstParentDir.(*DirINode).removeChildInode(Rename, newName)
 	}
 
 	// Upon successful rename, updating in-memory representation of the file entry
 	// file rename
 	if fnode, ok := (srcInode).(*FileINode); ok {
-		logger.Trace("Rename src is file", logger.Fields{Operation: Rename, From: oldPath, To: newPath})
-		fnode.Attrs.Name = req.NewName
+		logger.Trace("Rename src is file", logger.Fields{Operation: operationName, From: oldPath, To: newPath})
+		fnode.Attrs.Name = newName
 		fnode.Parent = dstParentDir.(*DirINode)
-		dstParentDir.(*DirINode).adoptChildInode(Rename, req.NewName, fnode)
+		dstParentDir.(*DirINode).adoptChildInode(Rename, newName, fnode)
 	}
 
 	// dir rename
 	if dnode, ok := (srcInode).(*DirINode); ok {
-		logger.Trace("Rename src is dir", logger.Fields{Operation: Rename, From: oldPath, To: newPath})
-		dnode.Attrs.Name = req.NewName
+		logger.Trace("Rename src is dir", logger.Fields{Operation: operationName, From: oldPath, To: newPath})
+		dnode.Attrs.Name = newName
 		dnode.Parent = dstParentDir.(*DirINode)
-		dstParentDir.(*DirINode).adoptChildInode(Rename, req.NewName, dnode)
+		dstParentDir.(*DirINode).adoptChildInode(Rename, newName, dnode)
 	}
 
-	logger.Info("Renamed", logger.Fields{Operation: Rename, From: oldPath, To: newPath})
+	logger.Info("Renamed", logger.Fields{Operation: operationName, From: oldPath, To: newPath})
 	return nil
+}
+
+// Responds on FUSE Rename request
+func (srcParent *DirINode) Rename2(ctx context.Context, req *fuse.Rename2Request, dstParentDir fs.Node) error {
+	srcParent.lockMutex()
+	defer srcParent.unlockMutex()
+
+	if req.Flags&fuse.RENAME_EXCHANGE == fuse.RENAME_EXCHANGE ||
+		req.Flags&fuse.RENAME_WHITEOUT == fuse.RENAME_WHITEOUT {
+		logger.Error("Rename2. Unsupported Flags ", logger.Fields{Operation: Rename2, Flags: req.Flags.String()})
+		return syscall.EINVAL
+	}
+
+	options := hdfs.RENAME_OPTION_NONE
+	if req.Flags&fuse.RENAME_NOREPLACE == fuse.RENAME_NOREPLACE {
+		options = options | hdfs.RENAME_NOREPLACE
+	}
+
+	return srcParent.renameInt(Rename2, req.OldName, req.NewName, dstParentDir, hdfs.RenameOptions(options))
 }
 
 // Responds on FUSE Chmod request

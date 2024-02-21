@@ -4,6 +4,8 @@ package hopsfsmount
 
 import (
 	"os"
+
+	"github.com/colinmarc/hdfs/v2"
 )
 
 // Adds automatic retry capability to HdfsAccessor with respect to RetryPolicy
@@ -130,6 +132,20 @@ func (fta *FaultTolerantHdfsAccessor) Rename(oldPath string, newPath string) err
 	op := fta.RetryPolicy.StartOperation()
 	for {
 		err := fta.Impl.Rename(oldPath, newPath)
+		if IsSuccessOrNonRetriableError(err) || !op.ShouldRetry("[%s] Rename to %s: %s", oldPath, newPath, err) {
+			return err
+		} else {
+			// Clean up the bad connection, to let underline connection to get automatic refresh
+			fta.Impl.Close()
+		}
+	}
+}
+
+// Renames file or directory
+func (fta *FaultTolerantHdfsAccessor) Rename2(oldPath string, newPath string, options hdfs.RenameOptions) error {
+	op := fta.RetryPolicy.StartOperation()
+	for {
+		err := fta.Impl.Rename2(oldPath, newPath, options)
 		if IsSuccessOrNonRetriableError(err) || !op.ShouldRetry("[%s] Rename to %s: %s", oldPath, newPath, err) {
 			return err
 		} else {

@@ -595,7 +595,7 @@ func withMount(t testing.TB, srcDir string, fn func(mntPath string, hdfsAccessor
 	// Wrapping with FaultTolerantHdfsAccessor
 	retryPolicy := NewDefaultRetryPolicy(WallClock{})
 	retryPolicy.MaxAttempts = 1 // for quick failure
-	logger.InitLogger("debug", false, "")
+	logger.InitLogger("ERROR", false, "")
 	hdfsAccessor, _ := NewHdfsAccessor("localhost:8020", WallClock{}, TLSConfig{TLS: false, RootCABundle: RootCABundle, ClientCertificate: ClientCertificate, ClientKey: ClientKey})
 	err := hdfsAccessor.EnsureConnected()
 	if err != nil {

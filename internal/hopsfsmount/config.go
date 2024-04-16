@@ -91,7 +91,7 @@ func ParseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	}
 
 	// validate the defaultFallBackOwner
-	err := validateDefaultUserAndGroup()
+	err := validateFallBackUserAndGroup(DefaultFallBackOwner, DefaultFallBackGroup)
 	if err != nil {
 		log.Fatalf("Error validating default user and/or group: %v", err)
 	}
@@ -156,28 +156,28 @@ func GetMountOptions(ro bool) []fuse.MountOption {
 	return mountOptions
 }
 
-func validateDefaultUserAndGroup() error {
-	if DefaultFallBackOwner == "" && DefaultFallBackGroup != "" {
+func validateFallBackUserAndGroup(fallBackOwner string, fallBackGroup string) error {
+	if fallBackOwner == "" && fallBackGroup != "" {
 		return errors.New("please provide the default owner of the filesystem")
 	}
 
 	var defaultGroup = ""
-	if DefaultFallBackOwner != "" {
-		defualtUser, err := user.Lookup(DefaultFallBackOwner)
+	if fallBackOwner != "" {
+		defualtUser, err := user.Lookup(fallBackOwner)
 		if err != nil {
 			return errors.New(fmt.Sprintf("error looking up default user. Error: %v", err))
 		}
 		defaultGroup = defualtUser.Name
 	}
-	if DefaultFallBackGroup != "" {
-		group, err := user.LookupGroup(DefaultFallBackGroup)
+	if fallBackGroup != "" {
+		group, err := user.LookupGroup(fallBackGroup)
 		if err != nil {
-			return errors.New(fmt.Sprintf("Error looking up default group. Error: %v", err))
+			return errors.New(fmt.Sprintf("error looking up default group. Error: %v", err))
 		}
-		defaultUser, _ := user.Lookup(DefaultFallBackOwner)
+		defaultUser, _ := user.Lookup(fallBackOwner)
 		groups, err := defaultUser.GroupIds()
 		if err != nil {
-			return errors.New(fmt.Sprintf("Failed to get groups of the default user. Error: %v", err))
+			return errors.New(fmt.Sprintf("failed to get groups of the default user. Error: %v", err))
 		}
 		var isValidGroup bool = false
 		for _, grp := range groups {
@@ -187,10 +187,10 @@ func validateDefaultUserAndGroup() error {
 			}
 		}
 		if !isValidGroup {
-			errors.New(fmt.Sprintf("Invalid default group. User %s id not a member of group %s", defaultUser.Name, group.Name))
+			errors.New(fmt.Sprintf("invalid default group. User %s id not a member of group %s", defaultUser.Name, group.Name))
 		}
 	}
-	if DefaultFallBackGroup == "" && defaultGroup != "" {
+	if fallBackGroup == "" && defaultGroup != "" {
 		DefaultFallBackGroup = defaultGroup
 	}
 	return nil

@@ -104,10 +104,15 @@ func (dfs *HdfsAccessorImpl) connectToNameNode() (*hdfs.Client, error) {
 
 // Performs an attempt to connect to the HDFS name
 func (dfs *HdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
+
 	if ForceOverrideUsername != "" {
 		hadoopUserName = ForceOverrideUsername
 		// if it exists we can look it up, otherwise it will always be 0
-		hadoopUserID = ugcache.LookupUId(hadoopUserName)
+		if DefaultFallBackOwner != "" {
+			hadoopUserID = ugcache.LookupUId(DefaultFallBackOwner)
+		} else {
+			hadoopUserID = ugcache.LookupUId(hadoopUserName)
+		}
 	} else {
 		hadoopUserName = os.Getenv("HADOOP_USER_NAME")
 		if hadoopUserName == "" {
@@ -117,10 +122,16 @@ func (dfs *HdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 			}
 			hadoopUserName = currentSystemUser
 		}
-		hadoopUserID = ugcache.LookupUId(hadoopUserName)
+
 		if hadoopUserName != "root" && hadoopUserID == 0 {
 			logger.Warn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", hadoopUserName), nil)
 		}
+	}
+
+	if DefaultFallBackOwner != "" {
+		hadoopUserID = ugcache.LookupUId(DefaultFallBackOwner)
+	} else {
+		hadoopUserID = ugcache.LookupUId(hadoopUserName)
 	}
 
 	logger.Info(fmt.Sprintf("Connecting as user: %s UID: %d", hadoopUserName, hadoopUserID), nil)
@@ -289,8 +300,8 @@ func (dfs *HdfsAccessorImpl) attrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 
 	modificationTime := time.Unix(int64(fi.ModificationTime())/1000, 0)
 
-	gid := ugcache.LookupGid(fi.OwnerGroup())
-	uid := ugcache.LookupUId(fi.Owner())
+	gid := getGid(fi.OwnerGroup())
+	uid := getUid(fi.Owner())
 
 	// suppress these logs if forceOverrideUsername is provided
 	if ForceOverrideUsername == "" {
@@ -521,4 +532,18 @@ func (dfs *HdfsAccessorImpl) lockHadoopClient() {
 
 func (dfs *HdfsAccessorImpl) unlockHadoopClient() {
 	dfs.MetadataClientMutex.Unlock()
+}
+
+func getUid(userName string) uint32 {
+	if DefaultFallBackOwner != "" {
+		return ugcache.LookupUId(DefaultFallBackOwner)
+	}
+	return ugcache.LookupUId(userName)
+}
+
+func getGid(groupName string) uint32 {
+	if DefaultFallBackGroup != "" {
+		return ugcache.LookupGid(DefaultFallBackGroup)
+	}
+	return ugcache.LookupGid(groupName)
 }

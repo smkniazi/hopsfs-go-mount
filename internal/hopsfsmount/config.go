@@ -1,10 +1,12 @@
 package hopsfsmount
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"os/user"
 	"regexp"
 	"time"
 
@@ -32,6 +34,8 @@ var AllowOther bool = false
 var HopfsProjectDatasetGroupRegex = regexp.MustCompile(`/*Projects/(?P<projectName>\w+)/(?P<datasetName>\w+)/\/*`)
 var EnablePageCache = false
 var CacheAttrsTimeSecs = 5
+var DefaultFallBackOwner = ""
+var DefaultFallBackGroup = ""
 
 func ParseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.BoolVar(&LazyMount, "lazy", false, "Allows to mount HopsFS filesystem before HopsFS is available")
@@ -56,6 +60,8 @@ func ParseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.BoolVar(&Version, "version", false, "Print version")
 	flag.BoolVar(&EnablePageCache, "enablePageCache", false, "Enable Linux Page Cache")
 	flag.IntVar(&CacheAttrsTimeSecs, "cacheAttrsTimeSecs", 5, "Cache INodes' Attrs. Set to 0 to disable caching INode attrs.")
+	flag.StringVar(&DefaultFallBackOwner, "defaultFallBackOwner", "", "The userid of the user that will be the default owner of the filesystem")
+	flag.StringVar(&DefaultFallBackGroup, "DefaultFallBackGroup", "", "The groupid of the user that will be the default owner of the filesystem")
 
 	flag.Usage = usage
 	flag.Parse()
@@ -82,6 +88,12 @@ func ParseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 		log.Fatalf("Invalid config. cacheAttrsTimeSecs can not be negative ")
 	} else {
 		CacheAttrsTimeDuration = time.Second * time.Duration(CacheAttrsTimeSecs)
+	}
+
+	// validate the defaultFallBackOwner
+	err := validateDefaultUserAndGroup()
+	if err != nil {
+		log.Fatalf("Error validating default user and/or group: %v", err)
 	}
 
 	logger.Info(fmt.Sprintf("Staging dir is:%s, Using TLS: %v, RetryAttempts: %d,  LogFile: %s", StagingDir, Tls, retryPolicy.MaxAttempts, LogFile), nil)
@@ -142,4 +154,44 @@ func GetMountOptions(ro bool) []fuse.MountOption {
 		mountOptions = append(mountOptions, fuse.ReadOnly())
 	}
 	return mountOptions
+}
+
+func validateDefaultUserAndGroup() error {
+	if DefaultFallBackOwner == "" && DefaultFallBackGroup != "" {
+		return errors.New("please provide the default owner of the filesystem")
+	}
+
+	var defaultGroup = ""
+	if DefaultFallBackOwner != "" {
+		defualtUser, err := user.Lookup(DefaultFallBackOwner)
+		if err != nil {
+			return errors.New(fmt.Sprintf("error looking up default user. Error: %v", err))
+		}
+		defaultGroup = defualtUser.Name
+	}
+	if DefaultFallBackGroup != "" {
+		group, err := user.LookupGroup(DefaultFallBackGroup)
+		if err != nil {
+			return errors.New(fmt.Sprintf("Error looking up default group. Error: %v", err))
+		}
+		defaultUser, _ := user.Lookup(DefaultFallBackOwner)
+		groups, err := defaultUser.GroupIds()
+		if err != nil {
+			return errors.New(fmt.Sprintf("Failed to get groups of the default user. Error: %v", err))
+		}
+		var isValidGroup bool = false
+		for _, grp := range groups {
+			if grp == group.Name {
+				isValidGroup = true
+				break
+			}
+		}
+		if !isValidGroup {
+			errors.New(fmt.Sprintf("Invalid default group. User %s id not a member of group %s", defaultUser.Name, group.Name))
+		}
+	}
+	if DefaultFallBackGroup == "" && defaultGroup != "" {
+		DefaultFallBackGroup = defaultGroup
+	}
+	return nil
 }

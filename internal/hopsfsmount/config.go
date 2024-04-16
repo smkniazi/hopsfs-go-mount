@@ -61,7 +61,7 @@ func ParseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.BoolVar(&EnablePageCache, "enablePageCache", false, "Enable Linux Page Cache")
 	flag.IntVar(&CacheAttrsTimeSecs, "cacheAttrsTimeSecs", 5, "Cache INodes' Attrs. Set to 0 to disable caching INode attrs.")
 	flag.StringVar(&DefaultFallBackOwner, "defaultFallBackOwner", "", "The userid of the user that will be the default owner of the filesystem")
-	flag.StringVar(&DefaultFallBackGroup, "DefaultFallBackGroup", "", "The groupid of the user that will be the default owner of the filesystem")
+	flag.StringVar(&DefaultFallBackGroup, "defaultFallBackGroup", "", "The groupid of the user that will be the default owner of the filesystem")
 
 	flag.Usage = usage
 	flag.Parse()

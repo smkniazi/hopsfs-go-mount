@@ -107,12 +107,6 @@ func (dfs *HdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 
 	if ForceOverrideUsername != "" {
 		hadoopUserName = ForceOverrideUsername
-		// if it exists we can look it up, otherwise it will always be 0
-		if DefaultFallBackOwner != "" {
-			hadoopUserID = ugcache.LookupUId(DefaultFallBackOwner)
-		} else {
-			hadoopUserID = ugcache.LookupUId(hadoopUserName)
-		}
 	} else {
 		hadoopUserName = os.Getenv("HADOOP_USER_NAME")
 		if hadoopUserName == "" {
@@ -122,16 +116,16 @@ func (dfs *HdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 			}
 			hadoopUserName = currentSystemUser
 		}
-
-		if hadoopUserName != "root" && hadoopUserID == 0 {
-			logger.Warn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", hadoopUserName), nil)
-		}
 	}
 
 	if DefaultFallBackOwner != "" {
 		hadoopUserID = ugcache.LookupUId(DefaultFallBackOwner)
 	} else {
 		hadoopUserID = ugcache.LookupUId(hadoopUserName)
+	}
+
+	if hadoopUserName != "root" && hadoopUserID == 0 {
+		logger.Warn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", hadoopUserName), nil)
 	}
 
 	logger.Info(fmt.Sprintf("Connecting as user: %s UID: %d", hadoopUserName, hadoopUserID), nil)

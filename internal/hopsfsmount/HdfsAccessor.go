@@ -118,15 +118,7 @@ func (dfs *HdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 		}
 	}
 
-	if DefaultFallBackOwner != "" {
-		hadoopUserID = ugcache.LookupUId(DefaultFallBackOwner)
-	} else {
-		hadoopUserID = ugcache.LookupUId(hadoopUserName)
-	}
-
-	if hadoopUserName != "root" && hadoopUserID == 0 {
-		logger.Warn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", hadoopUserName), nil)
-	}
+	hadoopUserID = ugcache.GetHadoopUid(hadoopUserName)
 
 	logger.Info(fmt.Sprintf("Connecting as user: %s UID: %d", hadoopUserName, hadoopUserID), nil)
 
@@ -294,8 +286,8 @@ func (dfs *HdfsAccessorImpl) attrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 
 	modificationTime := time.Unix(int64(fi.ModificationTime())/1000, 0)
 
-	gid := getGid(fi.OwnerGroup())
-	uid := getUid(fi.Owner())
+	gid := ugcache.GetFilesystemOwnerGroup(fi.OwnerGroup(), FallBackGroup)
+	uid := ugcache.GetFilesystemOwner(fi.Owner(), FallBackOwner)
 
 	// suppress these logs if forceOverrideUsername is provided
 	if ForceOverrideUsername == "" {
@@ -526,18 +518,4 @@ func (dfs *HdfsAccessorImpl) lockHadoopClient() {
 
 func (dfs *HdfsAccessorImpl) unlockHadoopClient() {
 	dfs.MetadataClientMutex.Unlock()
-}
-
-func getUid(userName string) uint32 {
-	if DefaultFallBackOwner != "" {
-		return ugcache.LookupUId(DefaultFallBackOwner)
-	}
-	return ugcache.LookupUId(userName)
-}
-
-func getGid(groupName string) uint32 {
-	if DefaultFallBackGroup != "" {
-		return ugcache.LookupGid(DefaultFallBackGroup)
-	}
-	return ugcache.LookupGid(groupName)
 }

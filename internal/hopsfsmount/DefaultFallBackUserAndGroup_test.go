@@ -17,7 +17,13 @@ func TestDefaultFallBackUerAndGroup(t *testing.T) {
 			"default owner not provided",
 			"",
 			"blah",
-			"please provide the default owner of the filesystem",
+			"fallBackOwner or fallBackGroup cannot be empty",
+		},
+		{
+			"default group not provided",
+			"blah",
+			"",
+			"fallBackOwner or fallBackGroup cannot be empty",
 		},
 		{
 			"non existent default owner",

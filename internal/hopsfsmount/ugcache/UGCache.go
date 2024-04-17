@@ -3,6 +3,7 @@
 package ugcache
 
 import (
+	"fmt"
 	"os/user"
 	"strconv"
 	"sync"
@@ -74,7 +75,7 @@ func LookupGid(groupName string) uint32 {
 	if groupName == "" {
 		return 0
 	}
-	// Note: this method is called under MetadataClientMutex, so accessing the cache dirctionary is safe
+	// Note: this method is called under MetadataClientMutex, so accessing the cache dictionary is safe
 	cacheEntry, ok := groupNameToUidCache[groupName]
 	if ok && time.Now().Before(cacheEntry.expires) {
 		return cacheEntry.id
@@ -153,4 +154,28 @@ func lockUGCache() {
 
 func unlockUGCache() {
 	ugMutex.Unlock()
+}
+
+func GetFilesystemOwner(dfsOwner string, defaultOwner string) uint32 {
+	if defaultOwner != "root" {
+		return LookupUId(defaultOwner)
+	}
+	return LookupGid(dfsOwner)
+}
+
+func GetFilesystemOwnerGroup(dfsGroup string, defaultGroup string) uint32 {
+	if defaultGroup != "root" {
+		return LookupGid(defaultGroup)
+	}
+	return LookupGid(dfsGroup)
+}
+
+func GetHadoopUid(hadoopUserName string) uint32 {
+	var hadoopUserID uint32
+	hadoopUserID = LookupUId(hadoopUserName)
+	if hadoopUserName != "root" && hadoopUserID == 0 {
+		logger.Warn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", hadoopUserName), nil)
+
+	}
+	return hadoopUserID
 }

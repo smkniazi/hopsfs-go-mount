@@ -34,8 +34,8 @@ var AllowOther bool = false
 var HopfsProjectDatasetGroupRegex = regexp.MustCompile(`/*Projects/(?P<projectName>\w+)/(?P<datasetName>\w+)/\/*`)
 var EnablePageCache = false
 var CacheAttrsTimeSecs = 5
-var DefaultFallBackOwner = ""
-var DefaultFallBackGroup = ""
+var FallBackOwner = "root"
+var FallBackGroup = "root"
 
 func ParseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.BoolVar(&LazyMount, "lazy", false, "Allows to mount HopsFS filesystem before HopsFS is available")
@@ -60,8 +60,8 @@ func ParseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.BoolVar(&Version, "version", false, "Print version")
 	flag.BoolVar(&EnablePageCache, "enablePageCache", false, "Enable Linux Page Cache")
 	flag.IntVar(&CacheAttrsTimeSecs, "cacheAttrsTimeSecs", 5, "Cache INodes' Attrs. Set to 0 to disable caching INode attrs.")
-	flag.StringVar(&DefaultFallBackOwner, "defaultFallBackOwner", "", "The userid of the user that will be the default owner of the filesystem")
-	flag.StringVar(&DefaultFallBackGroup, "defaultFallBackGroup", "", "The groupid of the user that will be the default owner of the filesystem")
+	flag.StringVar(&FallBackOwner, "defaultFallBackOwner", "root", "Local user name if the DFS user is not found on the local file system")
+	flag.StringVar(&FallBackGroup, "defaultFallBackGroup", "root", "Local group name if the DFS group is not found on the local file system.")
 
 	flag.Usage = usage
 	flag.Parse()
@@ -91,7 +91,7 @@ func ParseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	}
 
 	// validate the defaultFallBackOwner
-	err := validateFallBackUserAndGroup(DefaultFallBackOwner, DefaultFallBackGroup)
+	err := validateFallBackUserAndGroup(FallBackOwner, FallBackGroup)
 	if err != nil {
 		log.Fatalf("Error validating default user and/or group: %v", err)
 	}
@@ -157,41 +157,37 @@ func GetMountOptions(ro bool) []fuse.MountOption {
 }
 
 func validateFallBackUserAndGroup(fallBackOwner string, fallBackGroup string) error {
-	if fallBackOwner == "" && fallBackGroup != "" {
-		return errors.New("please provide the default owner of the filesystem")
+	if fallBackOwner == "" || fallBackGroup == "" {
+		return errors.New("fallBackOwner or fallBackGroup cannot be empty")
+	}
+	var defaultGroup = ""
+	defaultUser, err := user.Lookup(fallBackOwner)
+	if err != nil {
+		return errors.New(fmt.Sprintf("error looking up default user. Error: %v", err))
+	}
+	defaultGroup = defaultUser.Name
+
+	group, err := user.LookupGroup(fallBackGroup)
+	if err != nil {
+		return errors.New(fmt.Sprintf("error looking up default group. Error: %v", err))
+	}
+	groups, err := defaultUser.GroupIds()
+	if err != nil {
+		return errors.New(fmt.Sprintf("failed to get groups of the default user. Error: %v", err))
+	}
+	var isValidGroup bool = false
+	for _, grp := range groups {
+		if grp == group.Name {
+			isValidGroup = true
+			break
+		}
+	}
+	if !isValidGroup {
+		errors.New(fmt.Sprintf("invalid default group. User %s id not a member of group %s", defaultUser.Name, group.Name))
 	}
 
-	var defaultGroup = ""
-	if fallBackOwner != "" {
-		defualtUser, err := user.Lookup(fallBackOwner)
-		if err != nil {
-			return errors.New(fmt.Sprintf("error looking up default user. Error: %v", err))
-		}
-		defaultGroup = defualtUser.Name
-	}
-	if fallBackGroup != "" {
-		group, err := user.LookupGroup(fallBackGroup)
-		if err != nil {
-			return errors.New(fmt.Sprintf("error looking up default group. Error: %v", err))
-		}
-		defaultUser, _ := user.Lookup(fallBackOwner)
-		groups, err := defaultUser.GroupIds()
-		if err != nil {
-			return errors.New(fmt.Sprintf("failed to get groups of the default user. Error: %v", err))
-		}
-		var isValidGroup bool = false
-		for _, grp := range groups {
-			if grp == group.Name {
-				isValidGroup = true
-				break
-			}
-		}
-		if !isValidGroup {
-			errors.New(fmt.Sprintf("invalid default group. User %s id not a member of group %s", defaultUser.Name, group.Name))
-		}
-	}
-	if fallBackGroup == "" && defaultGroup != "" {
-		DefaultFallBackGroup = defaultGroup
+	if fallBackGroup == "root" && defaultGroup != "root" {
+		FallBackGroup = defaultGroup
 	}
 	return nil
 }

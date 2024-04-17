@@ -186,6 +186,7 @@ func validateFallBackUserAndGroup(fallBackOwner string, fallBackGroup string) er
 		errors.New(fmt.Sprintf("invalid default group. User %s id not a member of group %s", defaultUser.Name, group.Name))
 	}
 
+	// in the case the user provided only the fallBackOwner. We should use the real group of the user instead of the default root
 	if fallBackGroup == "root" && defaultGroup != "root" {
 		FallBackGroup = defaultGroup
 	}

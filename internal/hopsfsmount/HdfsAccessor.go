@@ -118,7 +118,7 @@ func (dfs *HdfsAccessorImpl) connectToNameNodeImpl() (*hdfs.Client, error) {
 		}
 	}
 
-	hadoopUserID = ugcache.GetHadoopUid(hadoopUserName)
+	hadoopUserID = ugcache.LookupUId(hadoopUserName)
 
 	logger.Info(fmt.Sprintf("Connecting as user: %s UID: %d", hadoopUserName, hadoopUserID), nil)
 
@@ -286,8 +286,8 @@ func (dfs *HdfsAccessorImpl) attrsFromFileInfo(fileInfo os.FileInfo) Attrs {
 
 	modificationTime := time.Unix(int64(fi.ModificationTime())/1000, 0)
 
-	gid := ugcache.GetFilesystemOwnerGroup(fi.OwnerGroup(), FallBackGroup)
-	uid := ugcache.GetFilesystemOwner(fi.Owner(), FallBackOwner)
+	gid := ugcache.LookupGid(fi.OwnerGroup())
+	uid := ugcache.LookupUId(fi.Owner())
 
 	// suppress these logs if forceOverrideUsername is provided
 	if ForceOverrideUsername == "" {

@@ -174,17 +174,6 @@ func validateFallBackUserAndGroup() error {
 		return errors.New(fmt.Sprintf("error looking up group. Error: %v", err))
 	}
 
-	groups, err := fbUser.GroupIds()
-	if err != nil {
-		return errors.New(fmt.Sprintf("failed to get groups of the user. Error: %v", err))
-	}
-
-	for _, grp := range groups {
-		if grp == FallBackGroup {
-			return errors.New(fmt.Sprintf("invalid group. User %s id not a member of group %s", fbUser.Name, fbGroup.Name))
-		}
-	}
-
 	uid64, err := strconv.ParseUint(fbUser.Uid, 10, 32)
 	if err != nil {
 		uid64 = (1 << 31) - 1

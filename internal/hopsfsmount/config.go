@@ -160,7 +160,6 @@ func GetMountOptions(ro bool) []fuse.MountOption {
 
 func validateFallBackUserAndGroup() error {
 
-	fmt.Printf(" ---> %s, %s ", FallBackUser, FallBackGroup)
 	if FallBackUser == "" || FallBackGroup == "" {
 		return errors.New("fallBackOwner or fallBackGroup cannot be empty")
 	}

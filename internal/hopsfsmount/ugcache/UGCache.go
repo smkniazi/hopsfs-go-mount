@@ -3,7 +3,6 @@
 package ugcache
 
 import (
-	"fmt"
 	"os/user"
 	"strconv"
 	"sync"
@@ -16,6 +15,9 @@ import (
 const (
 	UGCacheTime = 3 * time.Second
 )
+
+var FallBackUID = uint32(0)
+var FallBackGID = uint32(0)
 
 type ugID struct {
 	id      uint32    // User/Group Id
@@ -40,8 +42,10 @@ func LookupUId(userName string) uint32 {
 	defer unlockUGCache()
 
 	if userName == "" {
-		return 0
+		logger.Trace("Could not find UID. Retruning fallback UID", logger.Fields{"Group": userName, "FallBackGID": FallBackUID})
+		return FallBackUID
 	}
+
 	// Note: this method is called under MetadataClientMutex, so accessing the cache dirctionary is safe
 	cacheEntry, ok := userNameToUidCache[userName]
 	if ok && time.Now().Before(cacheEntry.expires) {
@@ -49,12 +53,13 @@ func LookupUId(userName string) uint32 {
 	}
 
 	u, err := user.Lookup(userName)
-	if u != nil {
+	if err != nil {
+		logger.Trace("Could not find UID. Retruning fallback UID", logger.Fields{"Error": err, "User": userName, "FallBackUID": FallBackUID})
+		return FallBackUID
+	} else {
 		var uid64 uint64
-		if err == nil {
-			// UID is returned as string, need to parse it
-			uid64, err = strconv.ParseUint(u.Uid, 10, 32)
-		}
+		// UID is returned as string, need to parse it
+		uid64, err = strconv.ParseUint(u.Uid, 10, 32)
 		if err != nil {
 			uid64 = (1 << 31) - 1
 		}
@@ -63,8 +68,6 @@ func LookupUId(userName string) uint32 {
 			expires: time.Now().Add(UGCacheTime)}
 		return uint32(uid64)
 
-	} else {
-		return 0
 	}
 }
 
@@ -73,7 +76,8 @@ func LookupGid(groupName string) uint32 {
 	defer unlockUGCache()
 
 	if groupName == "" {
-		return 0
+		logger.Trace("Could not find GID. Retruning fallback GID", logger.Fields{"Group": groupName, "FallBackGID": FallBackGID})
+		return FallBackGID
 	}
 	// Note: this method is called under MetadataClientMutex, so accessing the cache dictionary is safe
 	cacheEntry, ok := groupNameToUidCache[groupName]
@@ -82,12 +86,13 @@ func LookupGid(groupName string) uint32 {
 	}
 
 	g, err := user.LookupGroup(groupName)
-	if g != nil {
+	if err != nil {
+		logger.Trace("Could not find GID. Retruning fallback GID", logger.Fields{"Error": err, "Group": groupName, "FallBackGID": FallBackGID})
+		return FallBackGID
+	} else {
 		var gid64 uint64
-		if err == nil {
-			// GID is returned as string, need to parse it
-			gid64, err = strconv.ParseUint(g.Gid, 10, 32)
-		}
+		// GID is returned as string, need to parse it
+		gid64, err = strconv.ParseUint(g.Gid, 10, 32)
 		if err != nil {
 			gid64 = (1 << 31) - 1
 		}
@@ -96,8 +101,6 @@ func LookupGid(groupName string) uint32 {
 			expires: time.Now().Add(UGCacheTime)}
 		return uint32(gid64)
 
-	} else {
-		return 0
 	}
 }
 
@@ -154,28 +157,4 @@ func lockUGCache() {
 
 func unlockUGCache() {
 	ugMutex.Unlock()
-}
-
-func GetFilesystemOwner(dfsOwner string, defaultOwner string) uint32 {
-	if defaultOwner != "root" {
-		return LookupUId(defaultOwner)
-	}
-	return LookupGid(dfsOwner)
-}
-
-func GetFilesystemOwnerGroup(dfsGroup string, defaultGroup string) uint32 {
-	if defaultGroup != "root" {
-		return LookupGid(defaultGroup)
-	}
-	return LookupGid(dfsGroup)
-}
-
-func GetHadoopUid(hadoopUserName string) uint32 {
-	var hadoopUserID uint32
-	hadoopUserID = LookupUId(hadoopUserName)
-	if hadoopUserName != "root" && hadoopUserID == 0 {
-		logger.Warn(fmt.Sprintf("Unable to find user id for user: %s, returning uid: 0", hadoopUserName), nil)
-
-	}
-	return hadoopUserID
 }

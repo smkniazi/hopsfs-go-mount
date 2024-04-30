@@ -1,15 +1,19 @@
 package hopsfsmount
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"os/user"
 	"regexp"
+	"strconv"
 	"time"
 
 	"bazil.org/fuse"
 	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/logger"
+	"hopsworks.ai/hopsfsmount/internal/hopsfsmount/ugcache"
 )
 
 var CacheAttrsTimeDuration = 5 * time.Second
@@ -32,6 +36,8 @@ var AllowOther bool = false
 var HopfsProjectDatasetGroupRegex = regexp.MustCompile(`/*Projects/(?P<projectName>\w+)/(?P<datasetName>\w+)/\/*`)
 var EnablePageCache = false
 var CacheAttrsTimeSecs = 5
+var FallBackUser = "root"
+var FallBackGroup = "root"
 
 func ParseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.BoolVar(&LazyMount, "lazy", false, "Allows to mount HopsFS filesystem before HopsFS is available")
@@ -56,6 +62,8 @@ func ParseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.BoolVar(&Version, "version", false, "Print version")
 	flag.BoolVar(&EnablePageCache, "enablePageCache", false, "Enable Linux Page Cache")
 	flag.IntVar(&CacheAttrsTimeSecs, "cacheAttrsTimeSecs", 5, "Cache INodes' Attrs. Set to 0 to disable caching INode attrs.")
+	flag.StringVar(&FallBackUser, "fallBackUser", "root", "Local user name if the DFS user is not found on the local file system")
+	flag.StringVar(&FallBackGroup, "fallBackGroup", "root", "Local group name if the DFS group is not found on the local file system.")
 
 	flag.Usage = usage
 	flag.Parse()
@@ -82,6 +90,12 @@ func ParseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 		log.Fatalf("Invalid config. cacheAttrsTimeSecs can not be negative ")
 	} else {
 		CacheAttrsTimeDuration = time.Second * time.Duration(CacheAttrsTimeSecs)
+	}
+
+	// validate the defaultFallBackOwner
+	err := validateFallBackUserAndGroup()
+	if err != nil {
+		log.Fatalf("Error validating default user and/or group: %v", err)
 	}
 
 	logger.Info(fmt.Sprintf("Staging dir is:%s, Using TLS: %v, RetryAttempts: %d,  LogFile: %s", StagingDir, Tls, retryPolicy.MaxAttempts, LogFile), nil)
@@ -142,4 +156,35 @@ func GetMountOptions(ro bool) []fuse.MountOption {
 		mountOptions = append(mountOptions, fuse.ReadOnly())
 	}
 	return mountOptions
+}
+
+func validateFallBackUserAndGroup() error {
+
+	if FallBackUser == "" || FallBackGroup == "" {
+		return errors.New("fallBackOwner or fallBackGroup cannot be empty")
+	}
+
+	fbUser, err := user.Lookup(FallBackUser)
+	if err != nil {
+		return errors.New(fmt.Sprintf("error looking up user. Error: %v", err))
+	}
+
+	fbGroup, err := user.LookupGroup(FallBackGroup)
+	if err != nil {
+		return errors.New(fmt.Sprintf("error looking up group. Error: %v", err))
+	}
+
+	uid64, err := strconv.ParseUint(fbUser.Uid, 10, 32)
+	if err != nil {
+		uid64 = (1 << 31) - 1
+	}
+	ugcache.FallBackUID = uint32(uid64)
+
+	gid64, err := strconv.ParseUint(fbGroup.Gid, 10, 32)
+	if err != nil {
+		gid64 = (1 << 31) - 1
+	}
+	ugcache.FallBackGID = uint32(gid64)
+
+	return nil
 }

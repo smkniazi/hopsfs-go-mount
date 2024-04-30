@@ -233,7 +233,7 @@ func (dir *DirINode) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node
 		return nil, err
 	}
 
-	groupName, err := getGrupName(dir.AbsolutePathForChild(req.Name), req.Gid)
+	groupName, err := getGroupName(dir.AbsolutePathForChild(req.Name), req.Gid)
 	if err != nil {
 		logger.Error("Unable to find group information. ", logger.Fields{Operation: Mkdir,
 			Path: dir.AbsolutePathForChild(req.Name), GID: req.Gid,
@@ -284,7 +284,7 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 		return nil, nil, err
 	}
 
-	groupName, err := getGrupName(dir.AbsolutePathForChild(req.Name), req.Gid)
+	groupName, err := getGroupName(dir.AbsolutePathForChild(req.Name), req.Gid)
 	if err != nil {
 		logger.Error("Unable to find group information. ", logger.Fields{Operation: Create,
 			Path: dir.AbsolutePathForChild(req.Name), GID: req.Gid,

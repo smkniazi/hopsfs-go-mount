@@ -40,7 +40,7 @@ func SetAttrChownOp(attrs *Attrs, fileSystem *FileSystem, path string, req *fuse
 	}
 
 	if req.Valid.Gid() {
-		groupName, err = getGrupName(path, req.Gid)
+		groupName, err = getGroupName(path, req.Gid)
 		if err != nil {
 			logger.Error("Unable to find group information. ", logger.Fields{Operation: Setattr,
 				Path: path, GID: req.Gid, GetGroupFromHopsFSDatasetPath: UseGroupFromHopsFsDatasetPath})
@@ -85,7 +85,7 @@ func getUserName(uid uint32) (string, error) {
 	return userName, nil
 }
 
-func getGrupName(path string, gid uint32) (string, error) {
+func getGroupName(path string, gid uint32) (string, error) {
 	var groupName string
 	if UseGroupFromHopsFsDatasetPath {
 		groupName = getGroupNameFromPath(path)

@@ -191,7 +191,7 @@ func (dfs *HdfsAccessorImpl) CreateFile(path string, mode os.FileMode, overwrite
 		return nil, unwrapAndTranslateError(err)
 	}
 
-	writer, err := dfs.MetadataClient.CreateFile(path, serverDefaults.Replication, serverDefaults.BlockSize, mode, overwrite)
+	writer, err := dfs.MetadataClient.CreateFile(path, serverDefaults.Replication, serverDefaults.BlockSize, mode, overwrite, false)
 	if err != nil {
 		return nil, unwrapAndTranslateError(err)
 	}

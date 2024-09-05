@@ -1,14 +1,13 @@
 # Copyright (c) Hopsworks AB. All rights reserved.
 # Licensed under the MIT license. See LICENSE file in the project root for details.
 
-FROM centos:centos7
+FROM oraclelinux:8
 
 ARG userid=1000
 ARG groupid=1000
 ARG user=hopsfs
 
-RUN ulimit -n 1024000 && \
-   yum -y update && \
+RUN yum -y update && \
    yum -y install wget git make
 
 RUN  cd /tmp; \

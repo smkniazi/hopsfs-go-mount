@@ -241,7 +241,11 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 		file = existing
 		handle, err = file.NewFileHandle(true, req.Flags)
 		if err == nil && req.Flags&fuse.OpenTruncate != 0 {
-			err = handle.Truncate(0)
+			if err = handle.Truncate(0); err != nil {
+				// NewFileHandle registered the handle, and the kernel never
+				// receives it, so no RELEASE will come to unregister it.
+				handle.Release(ctx, nil)
+			}
 		}
 	}
 	if err != nil {

@@ -223,6 +223,27 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 	dir.removeNegativeCacheEntry(req.Name)
 	file := (dir.addOrUpdateChildInodeAttrs(Create, req.Name, newFileAttrs)).(*FileINode)
 	handle, err := file.NewFileHandle(false, req.Flags)
+	if err == syscall.EEXIST && req.Flags&fuse.OpenExclusive == 0 {
+		// The kernel sends CREATE when the lookup before it said the name was
+		// absent: this mount's negative cache, or another client created the
+		// file since. Without O_EXCL, open(2) on an existing file succeeds, so
+		// open it instead, truncating when asked.
+		logger.Info("Create of an existing file, opening it instead", logger.Fields{Operation: Create, Path: targetPath, Flags: req.Flags})
+		var attrs Attrs
+		node, statErr := dir.statInodeInHopsFS(Create, req.Name, &attrs)
+		if statErr != nil {
+			return nil, nil, statErr
+		}
+		existing, ok := node.(*FileINode)
+		if !ok {
+			return nil, nil, syscall.EISDIR
+		}
+		file = existing
+		handle, err = file.NewFileHandle(true, req.Flags)
+		if err == nil && req.Flags&fuse.OpenTruncate != 0 {
+			err = handle.Truncate(0)
+		}
+	}
 	if err != nil {
 		logger.Error("File creation failed", logger.Fields{Operation: Create, Path: targetPath, Mode: req.Mode, Flags: req.Flags, Error: err})
 		dir.removeChildInode(Create, req.Name)

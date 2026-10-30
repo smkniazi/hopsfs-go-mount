@@ -93,6 +93,11 @@ func (file *FileINode) Attr(ctx context.Context, a *fuse.Attr) error {
 	if file.FileSystem.Clock.Now().After(file.Attrs.Expires) {
 		_, err := parentStatInodeInHopsFS(file.Parent, GetattrFile, file.Attrs.Name, &file.Attrs)
 		if err != nil {
+			if err == syscall.ENOENT {
+				// A file this mount knew has gone from the backend: the one
+				// ENOENT on a known file, so it is logged at the default level.
+				logger.Warn("Known file not found on backend", logger.Fields{Operation: GetattrFile, Path: file.AbsolutePath(), Error: err})
+			}
 			return err
 		}
 	} else {
@@ -444,11 +449,14 @@ func (file *FileINode) createStagingFile(operation string, existsInDFS bool) (*o
 		file.pendingDFSWriter = w
 		logger.Info("Created file in DFS with group (writer kept open)", file.logInfo(logger.Fields{Operation: operation, Group: file.Attrs.DFSGroupName}))
 	} else {
-		// Request to write to existing file - stat to verify it exists and get metadata
+		// Request to write to existing file - stat to verify it exists and get metadata.
+		// The error is passed through: only a backend "not found" is ENOENT, a
+		// NameNode or connection failure stays EIO, so the application does not
+		// take a transient failure for a missing file.
 		upstreamInfo, err := hdfsAccessor.Stat(absPath)
 		if err != nil {
 			logger.Error("Failed to stat file in DFS", file.logInfo(logger.Fields{Operation: operation, Error: err}))
-			return nil, syscall.ENOENT
+			return nil, err
 		}
 
 		// Check if we have a valid cached staging file for this path

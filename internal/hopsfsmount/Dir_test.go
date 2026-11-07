@@ -310,6 +310,44 @@ func TestNegativeCacheInvalidatedByRename(t *testing.T) {
 	assert.NotNil(t, node)
 }
 
+// The connector retries a rename whose reply was lost on a new client, and the retry finds the
+// source gone. The rename succeeds when the destination holds the source's inode.
+func TestRenameFindingItsSourceAtTheDestinationSucceeds(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	mockClock := &MockClock{}
+	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
+	hdfsAccessor.EXPECT().TryReserve().Return(true).AnyTimes()
+	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"*"}, false, DelaySyncUntilClose, NewDefaultRetryPolicy(mockClock), mockClock)
+	root, _ := fs.Root()
+	rootDir := root.(*DirINode)
+	src := rootDir.addOrUpdateChildInodeAttrs("test", "srcfile", Attrs{Name: "srcfile", Mode: 0644, Inode: 42})
+
+	hdfsAccessor.EXPECT().Rename2("/srcfile", "/dstfile", gomock.Any()).Return(syscall.ENOENT)
+	hdfsAccessor.EXPECT().Stat("/dstfile").Return(Attrs{Name: "dstfile", Mode: 0644, Inode: 42}, nil)
+	err := rootDir.Rename(nil, &fuse.RenameRequest{OldName: "srcfile", NewName: "dstfile"}, rootDir)
+	assert.Nil(t, err)
+	assert.Equal(t, src, rootDir.getChildInode("test", "dstfile"))
+	assert.Nil(t, rootDir.getChildInode("test", "srcfile"))
+}
+
+// A rename that fails with ENOENT while another inode is at the destination keeps the error.
+func TestRenameFailingWithENOENTKeepsItWhenTheDestinationIsAnotherInode(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	mockClock := &MockClock{}
+	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
+	hdfsAccessor.EXPECT().TryReserve().Return(true).AnyTimes()
+	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"*"}, false, DelaySyncUntilClose, NewDefaultRetryPolicy(mockClock), mockClock)
+	root, _ := fs.Root()
+	rootDir := root.(*DirINode)
+	src := rootDir.addOrUpdateChildInodeAttrs("test", "srcfile", Attrs{Name: "srcfile", Mode: 0644, Inode: 42})
+
+	hdfsAccessor.EXPECT().Rename2("/srcfile", "/dstfile", gomock.Any()).Return(syscall.ENOENT)
+	hdfsAccessor.EXPECT().Stat("/dstfile").Return(Attrs{Name: "dstfile", Mode: 0644, Inode: 7}, nil)
+	err := rootDir.Rename(nil, &fuse.RenameRequest{OldName: "srcfile", NewName: "dstfile"}, rootDir)
+	assert.Equal(t, syscall.ENOENT, err)
+	assert.Equal(t, src, rootDir.getChildInode("test", "srcfile"))
+}
+
 // Testing that non-ENOENT errors are NOT cached
 func TestNegativeCacheOnlyForENOENT(t *testing.T) {
 	mockCtrl := gomock.NewController(t)

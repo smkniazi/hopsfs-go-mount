@@ -402,7 +402,8 @@ func (srcParent *DirINode) renameInt(operationName, oldName, newName string, dst
 	srcInode := srcParent.getChildInode(operationName, oldName)
 	dstInode := dstDir.getChildInode(operationName, newName)
 
-	if err := srcParent.FileSystem.getDFSConnector().Rename2(oldPath, newPath, options); err != nil {
+	if err := srcParent.FileSystem.getDFSConnector().Rename2(oldPath, newPath, options); err != nil &&
+		!srcParent.renameAlreadyApplied(operationName, err, srcInode, oldPath, newPath) {
 		logger.Error("Rename failed at the backend", logger.Fields{Operation: operationName, From: oldPath, To: newPath, Error: err})
 		return err
 	}
@@ -442,6 +443,34 @@ func (srcParent *DirINode) renameInt(operationName, oldName, newName string, dst
 
 	logger.Info("Renamed", logger.Fields{Operation: operationName, From: oldPath, To: newPath})
 	return nil
+}
+
+// renameAlreadyApplied tells whether a rename that failed with ENOENT had moved its source after
+// all. The connector retries a rename whose reply was lost on a new client, which the namenode's
+// retry cache does not recognise, so the retry finds the source gone although the first attempt
+// moved it; the destination then holds the source's inode. Without a cached source inode the
+// ENOENT stands.
+func (srcParent *DirINode) renameAlreadyApplied(operationName string, err error, srcInode fs.Node, oldPath, newPath string) bool {
+	if err != syscall.ENOENT {
+		return false
+	}
+	var srcID uint64
+	switch node := srcInode.(type) {
+	case *FileINode:
+		srcID = node.Attrs.Inode
+	case *DirINode:
+		srcID = node.Attrs.Inode
+	}
+	if srcID == 0 {
+		return false
+	}
+	dstAttrs, statErr := srcParent.FileSystem.getDFSConnector().Stat(newPath)
+	if statErr != nil || dstAttrs.Inode != srcID {
+		return false
+	}
+	logger.Warn("Rename found its source already at the destination; an earlier attempt applied it",
+		logger.Fields{Operation: operationName, From: oldPath, To: newPath})
+	return true
 }
 
 // statInodeInHopsFS performs a backend Stat for a named child and caches the result.

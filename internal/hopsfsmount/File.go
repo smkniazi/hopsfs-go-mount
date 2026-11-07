@@ -253,21 +253,27 @@ func (file *FileINode) flushAttempt(operation string) error {
 		file.pendingDFSWriter = nil
 		logger.Info("Reusing pending DFS writer from file creation", file.logInfo(logger.Fields{Operation: operation}))
 	} else {
-		// Retry path or subsequent flush: delete the file and recreate.
-		// We cannot rely on the overwrite functionality of CreateFile API.
-		// For example if the file has permission set to 444 then we can not overwrite it.
-		err := file.FileSystem.getDFSConnector().Remove(file.AbsolutePath())
-		if err != nil {
-			// may be this is a retry and the file has already been deleted
-			// log error and continue
-			logger.Warn("Unable to delete the file during flush.", file.logInfo(logger.Fields{Operation: operation, Error: err}))
-		}
-
+		// Retry path or subsequent flush: replace the file in one create, so that the path is
+		// never missing for another client's no-replace rename or exclusive create to take.
 		var createErr error
 		w, createErr = file.FileSystem.getDFSConnector().CreateFileWithGroup(file.AbsolutePath(), file.Attrs.Mode, true, file.Attrs.DFSGroupName)
 		if createErr != nil {
-			logger.Error("Error creating file in DFS", file.logInfo(logger.Fields{Operation: operation, Error: createErr}))
-			return createErr
+			// An overwrite needs write permission on the file (a 444 file refuses it) and no
+			// other lease on it, the lease of a failed earlier attempt included. Delete the
+			// file and create it again.
+			logger.Warn("Unable to overwrite the file during flush; deleting and creating it again", file.logInfo(logger.Fields{Operation: operation, Error: createErr}))
+			err := file.FileSystem.getDFSConnector().Remove(file.AbsolutePath())
+			if err != nil {
+				// may be this is a retry and the file has already been deleted
+				// log error and continue
+				logger.Warn("Unable to delete the file during flush.", file.logInfo(logger.Fields{Operation: operation, Error: err}))
+			}
+
+			w, createErr = file.FileSystem.getDFSConnector().CreateFileWithGroup(file.AbsolutePath(), file.Attrs.Mode, true, file.Attrs.DFSGroupName)
+			if createErr != nil {
+				logger.Error("Error creating file in DFS", file.logInfo(logger.Fields{Operation: operation, Error: createErr}))
+				return createErr
+			}
 		}
 	}
 

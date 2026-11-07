@@ -247,6 +247,78 @@ func TestFlushKeepsTheClientOnASubtreeLock(t *testing.T) {
 	assert.Nil(t, err)
 }
 
+// rewriteFileTwice creates fileName, writes and flushes it, then writes and flushes it again: the
+// first flush uses the create's writer, the second rewrites the file on the backend.
+func rewriteFileTwice(t *testing.T, hdfsAccessor *MockHdfsAccessor, fs *FileSystem, fileName string) {
+	hdfsAccessor.EXPECT().Stat(fileName).Return(Attrs{Name: fileName}, nil).AnyTimes()
+	hdfsAccessor.EXPECT().Chown(fileName, gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	hdfsAccessor.EXPECT().StatFs().Return(FsInfo{capacity: uint64(100), used: uint64(20), remaining: uint64(80)}, nil).AnyTimes()
+
+	root, _ := fs.Root()
+	_, h, err := root.(*DirINode).Create(nil, &fuse.CreateRequest{Name: fileName,
+		Flags: fuse.OpenReadWrite | fuse.OpenCreate, Mode: os.FileMode(0644)}, &fuse.CreateResponse{})
+	assert.Nil(t, err)
+	fileHandle := h.(*FileHandle)
+	for _, data := range []string{"hello world", "hello again"} {
+		err = fileHandle.Write(nil, &fuse.WriteRequest{Data: []byte(data), Offset: int64(0)}, &fuse.WriteResponse{})
+		assert.Nil(t, err)
+		err = fileHandle.Flush(nil, nil)
+		assert.Nil(t, err)
+	}
+	err = fileHandle.Release(nil, nil)
+	assert.Nil(t, err)
+}
+
+// A flush that rewrites a file replaces it in one create with overwrite: the path is never missing
+// on the backend, so another client's no-replace rename or exclusive create cannot take it.
+func TestRewriteFlushOverwritesWithoutRemoving(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	mockClock := &MockClock{}
+	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
+	hdfsAccessor.EXPECT().TryReserve().Return(true).AnyTimes()
+	fileName := "/testRewriteFlush"
+	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"*"}, false, DelaySyncUntilClose, NewDefaultRetryPolicy(mockClock), mockClock)
+
+	created := NewMockHdfsWriter(mockCtrl)
+	created.EXPECT().Write(gomock.Any()).Return(11, nil).AnyTimes()
+	created.EXPECT().Close().Return(nil)
+	rewritten := NewMockHdfsWriter(mockCtrl)
+	rewritten.EXPECT().Write(gomock.Any()).Return(11, nil).AnyTimes()
+	rewritten.EXPECT().Close().Return(nil)
+	gomock.InOrder(
+		hdfsAccessor.EXPECT().CreateFileWithGroup(fileName, gomock.Any(), false, gomock.Any()).Return(created, nil),
+		hdfsAccessor.EXPECT().CreateFileWithGroup(fileName, gomock.Any(), true, gomock.Any()).Return(rewritten, nil),
+	)
+
+	rewriteFileTwice(t, hdfsAccessor, fs, fileName)
+}
+
+// A rewrite the backend refuses to overwrite (a 444 file, another lease on it) deletes the file and
+// creates it again.
+func TestRewriteFlushRemovesWhenOverwriteIsRefused(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	mockClock := &MockClock{}
+	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
+	hdfsAccessor.EXPECT().TryReserve().Return(true).AnyTimes()
+	fileName := "/testRewriteFlushRefused"
+	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"*"}, false, DelaySyncUntilClose, NewDefaultRetryPolicy(mockClock), mockClock)
+
+	created := NewMockHdfsWriter(mockCtrl)
+	created.EXPECT().Write(gomock.Any()).Return(11, nil).AnyTimes()
+	created.EXPECT().Close().Return(nil)
+	rewritten := NewMockHdfsWriter(mockCtrl)
+	rewritten.EXPECT().Write(gomock.Any()).Return(11, nil).AnyTimes()
+	rewritten.EXPECT().Close().Return(nil)
+	gomock.InOrder(
+		hdfsAccessor.EXPECT().CreateFileWithGroup(fileName, gomock.Any(), false, gomock.Any()).Return(created, nil),
+		hdfsAccessor.EXPECT().CreateFileWithGroup(fileName, gomock.Any(), true, gomock.Any()).Return(nil, syscall.EACCES),
+		hdfsAccessor.EXPECT().Remove(fileName).Return(nil),
+		hdfsAccessor.EXPECT().CreateFileWithGroup(fileName, gomock.Any(), true, gomock.Any()).Return(rewritten, nil),
+	)
+
+	rewriteFileTwice(t, hdfsAccessor, fs, fileName)
+}
+
 func TestFlushFile(t *testing.T) {
 	t.Skip()
 	mockCtrl := gomock.NewController(t)

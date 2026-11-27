@@ -56,8 +56,13 @@ func (dir *DirINode) Attr(ctx context.Context, a *fuse.Attr) error {
 	dir.lockMutex()
 	defer dir.unlockMutex()
 
-	if dir.Parent != nil && dir.FileSystem.Clock.Now().After(dir.Attrs.Expires) {
-		_, err := parentStatInodeInHopsFS(dir.Parent, GetattrDir, dir.Attrs.Name, &dir.Attrs)
+	if dir.FileSystem.Clock.Now().After(dir.Attrs.Expires) {
+		var err error
+		if dir.Parent == nil {
+			err = dir.refreshRootAttrs()
+		} else {
+			_, err = parentStatInodeInHopsFS(dir.Parent, GetattrDir, dir.Attrs.Name, &dir.Attrs)
+		}
 		if err != nil {
 			return err
 		}
@@ -456,6 +461,23 @@ func (srcParent *DirINode) renameInt(operationName, oldName, newName string, dst
 	}
 
 	logger.Info("Renamed", logger.Fields{Operation: operationName, From: oldPath, To: newPath})
+	return nil
+}
+
+// refreshRootAttrs gives the mount root the owner, group, mode and times of SrcDir,
+// keeping the root's inode number and empty name.
+func (dir *DirINode) refreshRootAttrs() error {
+	attrs, err := dir.FileSystem.getDFSConnector().Stat(dir.FileSystem.SrcDir)
+	if err != nil {
+		logger.Warn("Stat of the mounted directory failed", logger.Fields{Operation: GetattrDir, Path: dir.FileSystem.SrcDir, Error: err})
+		return err
+	}
+	attrs.Name = dir.Attrs.Name
+	attrs.Inode = dir.Attrs.Inode
+	if attrs.Expires.IsZero() {
+		attrs.Expires = dir.FileSystem.Clock.Now().Add(CacheAttrsTimeDuration)
+	}
+	dir.Attrs = attrs
 	return nil
 }
 

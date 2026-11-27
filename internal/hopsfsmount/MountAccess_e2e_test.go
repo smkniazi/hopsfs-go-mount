@@ -9,10 +9,19 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// setForTest sets *v to value until the test ends.
+func setForTest[T any](t testing.TB, v *T, value T) {
+	t.Helper()
+	previous := *v
+	*v = value
+	t.Cleanup(func() { *v = previous })
+}
 
 func writeBackendFile(t testing.TB, accessor HdfsAccessor, path, content string, mode os.FileMode) {
 	t.Helper()
@@ -51,5 +60,27 @@ func TestMountRefusesNamespaceChangesOutsideAllowedPrefixes(t *testing.T) {
 		assert.NoError(t, os.Rename(filepath.Join(mnt, "allowed", "file"), filepath.Join(mnt, "allowed", "child", "file")))
 		_, err = backend.Stat(base + "/allowed/child/file")
 		assert.NoError(t, err)
+	})
+}
+
+// The mount point shows the mode of the mounted directory, and follows a
+// change of it once the attrs expire.
+func TestMountRootShowsTheMountedDirectory(t *testing.T) {
+	setForTest(t, &CacheAttrsTimeDuration, time.Second)
+	backend := connectBackend(t)
+	base := uniqueBackendBase("root")
+	ensureBackendDir(t, backend, base, base)
+	require.NoError(t, backend.Chmod(base, 0751))
+
+	withMount(t, base, DelaySyncUntilClose, func(mnt string, _ HdfsAccessor) {
+		fi, err := os.Stat(mnt)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0751), fi.Mode().Perm())
+
+		require.NoError(t, backend.Chmod(base, 0750))
+		time.Sleep(2 * CacheAttrsTimeDuration)
+		fi, err = os.Stat(mnt)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0750), fi.Mode().Perm())
 	})
 }

@@ -6,7 +6,6 @@ package hopsfsmount
 import (
 	"fmt"
 	"path"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,7 +19,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/user"
 	"sync"
 )
 
@@ -129,23 +127,12 @@ func (filesystem *FileSystem) Unmount(mountPoint string) {
 	}
 }
 
-// Returns root directory of the filesystem
+// Returns root directory of the filesystem. Its attrs start expired, so the first
+// Attr fills them from SrcDir (DirINode.refreshRootAttrs).
 func (filesystem *FileSystem) Root() (fs.Node, error) {
-	//get UID and GID for the current user
-	cu, err := user.Current()
-	if err != nil {
-		logger.Fatal(fmt.Sprintf("Faile to get current user information. Error: %v", err), nil)
-	}
-	uid64, _ := strconv.ParseUint(cu.Uid, 10, 32)
-	gid64, _ := strconv.ParseUint(cu.Gid, 10, 32)
-
 	return newDirINode(filesystem, nil, Attrs{
 		Inode: 1,
-		Uid:   uint32(uid64),
-		Gid:   uint32(gid64),
-		Mode:  0755 | os.ModeDir,
-		Mtime: filesystem.Clock.Now(),
-		Ctime: filesystem.Clock.Now(),
+		Mode:  os.ModeDir,
 	}), nil
 }
 

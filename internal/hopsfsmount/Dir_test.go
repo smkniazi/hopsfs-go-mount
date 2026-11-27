@@ -130,6 +130,39 @@ func TestNamespaceChangesOutsideAllowedPrefixesAreRefused(t *testing.T) {
 	assert.Nil(t, err)
 }
 
+// The mount root reports the owner, group and mode of the mounted directory,
+// from the first Attr on and again once its attrs expire, and keeps inode 1.
+func TestRootAttrsFollowTheMountedDirectory(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	mockClock := &MockClock{now: time.Now()}
+	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
+	hdfsAccessor.EXPECT().TryReserve().Return(true).AnyTimes()
+	fs, _ := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/Projects/demo", []string{"*"}, false, DelaySyncUntilClose, NewDefaultRetryPolicy(mockClock), mockClock)
+	root, _ := fs.Root()
+
+	hdfsAccessor.EXPECT().Stat("/Projects/demo").Return(Attrs{Name: "demo", Inode: 77, Mode: os.ModeDir | 0555, Uid: 1235, Gid: 1234,
+		Expires: mockClock.Now().Add(CacheAttrsTimeDuration)}, nil)
+	var attr fuse.Attr
+	assert.Nil(t, root.(*DirINode).Attr(nil, &attr))
+	assert.Equal(t, os.ModeDir|0555, attr.Mode)
+	assert.Equal(t, uint32(1235), attr.Uid)
+	assert.Equal(t, uint32(1234), attr.Gid)
+	assert.Equal(t, uint64(1), attr.Inode)
+
+	// Cached until the attrs expire.
+	assert.Nil(t, root.(*DirINode).Attr(nil, &attr))
+
+	mockClock.NotifyTimeElapsed(CacheAttrsTimeDuration + time.Second)
+	hdfsAccessor.EXPECT().Stat("/Projects/demo").Return(Attrs{Name: "demo", Mode: os.ModeDir | 0750, Uid: 1235, Gid: 1234,
+		Expires: mockClock.Now().Add(CacheAttrsTimeDuration)}, nil)
+	assert.Nil(t, root.(*DirINode).Attr(nil, &attr))
+	assert.Equal(t, os.ModeDir|0750, attr.Mode)
+
+	mockClock.NotifyTimeElapsed(CacheAttrsTimeDuration + time.Second)
+	hdfsAccessor.EXPECT().Stat("/Projects/demo").Return(Attrs{}, syscall.EIO)
+	assert.Equal(t, syscall.EIO, root.(*DirINode).Attr(nil, &attr))
+}
+
 // Testing processing of .zip files if '-expandZips' isn't activated
 func TestReadDirWithZipExpansionDisabled(t *testing.T) {
 	mockCtrl := gomock.NewController(t)

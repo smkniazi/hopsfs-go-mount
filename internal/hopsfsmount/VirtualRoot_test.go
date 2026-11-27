@@ -4,6 +4,7 @@ import (
 	"os"
 	"syscall"
 	"testing"
+	"time"
 
 	"bazil.org/fuse"
 	"github.com/golang/mock/gomock"
@@ -353,6 +354,53 @@ func TestVirtualDirectoryMetadataIsCached(t *testing.T) {
 	sharedProjectAgain, err := first.(*VirtualDirINode).Lookup(nil, "other-project")
 	assert.Nil(t, err)
 	assert.Equal(t, sharedProject, sharedProjectAgain)
+}
+
+// A virtual root takes its owner and mode from the mounted project both when it
+// is built and when its attrs are refreshed after they expire; the strict mock
+// fails the test on any Stat of the virtual directory's backend root.
+func TestVirtualRootAttrsFollowTheMountedProjectAfterExpiry(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	mockClock := &MockClock{}
+	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
+	hdfsAccessor.EXPECT().TryReserve().Return(true).AnyTimes()
+
+	fs, _ := NewFileSystem(
+		[]HdfsAccessor{hdfsAccessor},
+		"/Projects/current-project",
+		[]string{"*"},
+		false,
+		DelaySyncUntilClose,
+		NewDefaultRetryPolicy(mockClock),
+		mockClock,
+		WithVirtualDirectory("shared-datasets", []string{"other-project/shared-a"}, "/Projects"),
+	)
+	root, _ := fs.Root()
+
+	hdfsAccessor.EXPECT().Stat("/Projects/current-project/shared-datasets").Return(Attrs{}, syscall.ENOENT)
+	hdfsAccessor.EXPECT().Stat("/Projects/current-project").DoAndReturn(func(string) (Attrs, error) {
+		return Attrs{
+			Name:    "current-project",
+			Mode:    os.ModeDir | 0700,
+			Uid:     111,
+			Gid:     111,
+			Expires: mockClock.Now().Add(CacheAttrsTimeDuration),
+		}, nil
+	}).Times(2)
+	sharedRoot, err := root.(*DirINode).Lookup(nil, "shared-datasets")
+	assert.Nil(t, err)
+
+	var built fuse.Attr
+	assert.Nil(t, sharedRoot.(*VirtualDirINode).Attr(nil, &built))
+	assert.Equal(t, uint32(111), built.Uid)
+	assert.Equal(t, os.ModeDir|0700, built.Mode)
+
+	mockClock.NotifyTimeElapsed(CacheAttrsTimeDuration + time.Second)
+	var refreshed fuse.Attr
+	assert.Nil(t, sharedRoot.(*VirtualDirINode).Attr(nil, &refreshed))
+	assert.Equal(t, uint32(111), refreshed.Uid)
+	assert.Equal(t, os.ModeDir|0700, refreshed.Mode)
+	assert.Equal(t, built.Inode, refreshed.Inode)
 }
 
 func TestVirtualDirectoryMutationsOutsideConfiguredLeavesAreRejected(t *testing.T) {

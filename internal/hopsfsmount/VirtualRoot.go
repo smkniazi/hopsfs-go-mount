@@ -265,17 +265,27 @@ func (dir *VirtualDirINode) statInodeInHopsFS(operation, name string, attrs *Att
 	return inode, nil
 }
 
-// refreshSyntheticAttrs re-stats the backend path this synthetic node represents and updates
-// the cached Attrs in place. The synthetic Name and Inode are preserved so the FUSE kernel
-// continues to see the same identity; only the backend-derived fields (mode, owner, timestamps,
-// size, expiry) get refreshed.
+// attrsPath is the backend path this synthetic node takes its attrs from: the mounted
+// project for a virtual root, the configured backend path for a branch.
+func (dir *VirtualDirINode) attrsPath() string {
+	if dir.relPath == "" {
+		return dir.FileSystem.SrcDir
+	}
+	return dir.AbsolutePath()
+}
+
+// refreshSyntheticAttrs re-stats attrsPath and updates the cached Attrs in place. The
+// synthetic Name and Inode are preserved so the FUSE kernel continues to see the same
+// identity; only the backend-derived fields (mode, owner, timestamps, size, expiry) get
+// refreshed.
 func (dir *VirtualDirINode) refreshSyntheticAttrs() error {
-	backendAttrs, err := dir.FileSystem.getDFSConnector().Stat(dir.AbsolutePath())
+	statPath := dir.attrsPath()
+	backendAttrs, err := dir.FileSystem.getDFSConnector().Stat(statPath)
 	if err != nil {
 		return err
 	}
 	if !backendAttrs.Mode.IsDir() {
-		return fmt.Errorf("virtual directory path %q is not a directory", dir.AbsolutePath())
+		return fmt.Errorf("virtual directory path %q is not a directory", statPath)
 	}
 	backendAttrs.Name = dir.Attrs.Name
 	backendAttrs.Inode = dir.Attrs.Inode

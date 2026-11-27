@@ -149,6 +149,9 @@ func (dir *DirINode) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node
 	defer dir.unlockMutex()
 
 	targetPath := dir.AbsolutePathForChild(req.Name)
+	if err := dir.FileSystem.checkNamespaceChange(Mkdir, targetPath); err != nil {
+		return nil, err
+	}
 
 	// check user and group information first.
 	userName, err := getUserName(req.Uid)
@@ -191,8 +194,11 @@ func (dir *DirINode) Create(ctx context.Context, req *fuse.CreateRequest, resp *
 	dir.lockMutex()
 	defer dir.unlockMutex()
 
-	req.Mode = ComputePermissions(req.Mode)
 	targetPath := dir.AbsolutePathForChild(req.Name)
+	if err := dir.FileSystem.checkNamespaceChange(Create, targetPath); err != nil {
+		return nil, nil, err
+	}
+	req.Mode = ComputePermissions(req.Mode)
 	logger.Info("Creating a new file", logger.Fields{Operation: Create, Path: targetPath, Mode: req.Mode, Flags: req.Flags})
 
 	// first determine the usename and grup name for the new file
@@ -266,6 +272,9 @@ func (dir *DirINode) Remove(ctx context.Context, req *fuse.RemoveRequest) error 
 	defer dir.unlockMutex()
 
 	targetPath := dir.AbsolutePathForChild(req.Name)
+	if err := dir.FileSystem.checkNamespaceChange(Remove, targetPath); err != nil {
+		return err
+	}
 
 	logger.Debug("Removing path", logger.Fields{Operation: Remove, Path: targetPath})
 	err := dir.FileSystem.getDFSConnector().Remove(targetPath)
@@ -394,6 +403,12 @@ func (srcParent *DirINode) renameInt(operationName, oldName, newName string, dst
 
 	oldPath := srcParent.AbsolutePathForChild(oldName)
 	newPath := dstDir.AbsolutePathForChild(newName)
+	if err := srcParent.FileSystem.checkNamespaceChange(operationName, oldPath); err != nil {
+		return err
+	}
+	if err := srcParent.FileSystem.checkNamespaceChange(operationName, newPath); err != nil {
+		return err
+	}
 	logger.Debug("Renaming", logger.Fields{Operation: operationName, From: oldPath, To: newPath})
 
 	// Inspect local caches only — do not stat the backend before the rename. The backend

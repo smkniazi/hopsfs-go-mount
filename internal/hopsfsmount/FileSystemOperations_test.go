@@ -1059,6 +1059,11 @@ func testNameNodeAddresses() []string {
 
 func withMount(t testing.TB, srcDir string, delaySyncUntilClose bool, fn func(mntPath string, hdfsAccessor HdfsAccessor)) {
 	t.Helper()
+	withMountAndPrefixes(t, srcDir, delaySyncUntilClose, []string{"*"}, fn)
+}
+
+func withMountAndPrefixes(t testing.TB, srcDir string, delaySyncUntilClose bool, allowedPrefixes []string, fn func(mntPath string, hdfsAccessor HdfsAccessor)) {
+	t.Helper()
 
 	// Enable cache for this test
 	if StagingCache == nil {
@@ -1096,7 +1101,7 @@ func withMount(t testing.TB, srcDir string, delaySyncUntilClose bool, fn func(mn
 	ftHdfsAccessor := NewFaultTolerantHdfsAccessor(hdfsAccessor, retryPolicy)
 
 	// Creating the virtual file system
-	fileSystem, err := NewFileSystem([]HdfsAccessor{ftHdfsAccessor}, srcDir, []string{"*"}, false, delaySyncUntilClose, retryPolicy, WallClock{})
+	fileSystem, err := NewFileSystem([]HdfsAccessor{ftHdfsAccessor}, srcDir, allowedPrefixes, false, delaySyncUntilClose, retryPolicy, WallClock{})
 	if err != nil {
 		t.Fatalf(fmt.Sprintf("Error/NewFileSystem: %v ", err), nil)
 	}

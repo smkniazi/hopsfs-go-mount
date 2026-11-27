@@ -77,6 +77,59 @@ func TestReadDirWithFiltering(t *testing.T) {
 	assert.Equal(t, "bar", dirents[1].Name)
 }
 
+// A create, mkdir, remove or rename that names a path outside the allowed prefixes
+// fails with EPERM before any backend call: the strict mock expects none of them.
+// "allowedX" checks that a prefix matches whole path components only.
+func TestNamespaceChangesOutsideAllowedPrefixesAreRefused(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	mockClock := &MockClock{}
+	hdfsAccessor := NewMockHdfsAccessor(mockCtrl)
+	hdfsAccessor.EXPECT().TryReserve().Return(true).AnyTimes()
+	fs, err := NewFileSystem([]HdfsAccessor{hdfsAccessor}, "/", []string{"allowed"}, false, DelaySyncUntilClose, NewDefaultRetryPolicy(mockClock), mockClock)
+	assert.Nil(t, err)
+	root, _ := fs.Root()
+	rootDir := root.(*DirINode)
+	allowedDir := rootDir.addOrUpdateChildInodeAttrs("test", "allowed", Attrs{Name: "allowed", Mode: os.ModeDir | 0755}).(*DirINode)
+
+	for _, name := range []string{"hidden", "allowedX"} {
+		_, err = rootDir.Mkdir(nil, &fuse.MkdirRequest{Name: name, Mode: os.ModeDir | 0755})
+		assert.Equal(t, syscall.EPERM, err, "mkdir /%s", name)
+
+		_, _, err = rootDir.Create(nil, &fuse.CreateRequest{Name: name, Mode: 0644}, &fuse.CreateResponse{})
+		assert.Equal(t, syscall.EPERM, err, "create /%s", name)
+
+		err = rootDir.Remove(nil, &fuse.RemoveRequest{Name: name})
+		assert.Equal(t, syscall.EPERM, err, "remove /%s", name)
+	}
+
+	// The destination is outside the prefixes.
+	err = rootDir.Rename(nil, &fuse.RenameRequest{OldName: "allowed", NewName: "hidden"}, rootDir)
+	assert.Equal(t, syscall.EPERM, err)
+	err = rootDir.Rename2(nil, &fuse.Rename2Request{OldName: "allowed", NewName: "hidden"}, rootDir)
+	assert.Equal(t, syscall.EPERM, err)
+
+	// The source is outside the prefixes.
+	err = rootDir.Rename(nil, &fuse.RenameRequest{OldName: "hidden", NewName: "moved"}, allowedDir)
+	assert.Equal(t, syscall.EPERM, err)
+
+	// Symlink and Link never reach the backend.
+	_, err = rootDir.Symlink(nil, &fuse.SymlinkRequest{NewName: "hidden", Target: "allowed"})
+	assert.Equal(t, syscall.ENOTSUP, err)
+	_, err = rootDir.Link(nil, &fuse.LinkRequest{NewName: "hidden"}, allowedDir)
+	assert.Equal(t, syscall.ENOTSUP, err)
+
+	// Inside the prefix the same operations reach the backend.
+	hdfsAccessor.EXPECT().MkdirWithGroup("/allowed/child", gomock.Any(), gomock.Any()).Return(nil)
+	_, err = allowedDir.Mkdir(nil, &fuse.MkdirRequest{Name: "child", Mode: os.ModeDir | 0755})
+	assert.Nil(t, err)
+	hdfsAccessor.EXPECT().Rename2("/allowed/child", "/allowed/renamed", gomock.Any()).Return(nil)
+	err = allowedDir.Rename(nil, &fuse.RenameRequest{OldName: "child", NewName: "renamed"}, allowedDir)
+	assert.Nil(t, err)
+	hdfsAccessor.EXPECT().Remove("/allowed/renamed").Return(nil)
+	err = allowedDir.Remove(nil, &fuse.RemoveRequest{Name: "renamed", Dir: true})
+	assert.Nil(t, err)
+}
+
 // Testing processing of .zip files if '-expandZips' isn't activated
 func TestReadDirWithZipExpansionDisabled(t *testing.T) {
 	mockCtrl := gomock.NewController(t)

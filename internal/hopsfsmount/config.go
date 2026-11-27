@@ -65,7 +65,7 @@ func ParseArgsAndInitLogger(retryPolicy *RetryPolicy) {
 	flag.IntVar(&retryPolicy.MaxAttempts, "retryMaxAttempts", 10, "Maxumum retry attempts for failed operations")
 	flag.DurationVar(&retryPolicy.MinDelay, "retryMinDelay", 1*time.Second, "minimum delay between retries (note, first retry always happens immediatelly)")
 	flag.DurationVar(&retryPolicy.MaxDelay, "retryMaxDelay", 60*time.Second, "maximum delay between retries")
-	flag.StringVar(&AllowedPrefixesString, "allowedPrefixes", "*", "Comma-separated list of allowed path prefixes on the remote file system, if specified the mount point will expose access to those prefixes only")
+	flag.StringVar(&AllowedPrefixesString, "allowedPrefixes", "*", "Comma-separated list of allowed path prefixes on the remote file system, if specified the mount point will expose access to those prefixes only. A directory above a prefix is not exposed unless it is itself allowed")
 	flag.BoolVar(&ReadOnly, "readOnly", false, "Enables mount with readonly")
 	flag.BoolVar(&DelaySyncUntilClose, "delaySyncUntilClose", true, "Delay sync/flush operations until file close (default: true)")
 	flag.StringVar(&LogLevel, "logLevel", "info", "logs to be printed. error, warn, info, debug, trace")

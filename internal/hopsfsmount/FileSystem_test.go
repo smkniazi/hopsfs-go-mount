@@ -32,6 +32,26 @@ func TestIsPathAllowedForMiscPrefixes(t *testing.T) {
 	assert.False(t, fs.IsPathAllowed("w/z"))
 }
 
+func TestAllowedPrefixesAreNormalized(t *testing.T) {
+	fs, err := NewFileSystem(nil, "/", []string{" /foo/ ", "", "bar/baz"}, false, DelaySyncUntilClose, NewDefaultRetryPolicy(WallClock{}), WallClock{})
+	assert.Nil(t, err)
+	assert.Equal(t, []string{"foo", "bar/baz"}, fs.AllowedPrefixes)
+	assert.True(t, fs.IsPathAllowed("/foo"))
+	assert.True(t, fs.IsPathAllowed("/foo/x"))
+	assert.False(t, fs.IsPathAllowed("/foobar"))
+	assert.True(t, fs.IsPathAllowed("/bar/baz/x"))
+	assert.False(t, fs.IsPathAllowed("/bar"))
+}
+
+// A prefix that only a rewrite would make valid is refused rather than read as a
+// different prefix.
+func TestAmbiguousAllowedPrefixesAreRejected(t *testing.T) {
+	for _, prefix := range []string{"/", "//", "a//b", "a/./b", "a/..", "a/../b", ".", "..", "../x"} {
+		_, err := NewFileSystem(nil, "/", []string{"foo", prefix}, false, DelaySyncUntilClose, NewDefaultRetryPolicy(WallClock{}), WallClock{})
+		assert.NotNil(t, err, "prefix %q", prefix)
+	}
+}
+
 func TestStatfs(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockClock := &MockClock{}

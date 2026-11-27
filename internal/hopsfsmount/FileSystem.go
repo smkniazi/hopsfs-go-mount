@@ -5,8 +5,10 @@ package hopsfsmount
 
 import (
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"bazil.org/fuse"
@@ -50,6 +52,10 @@ var _ fs.FSStatfser = (*FileSystem)(nil)
 
 // Creates an instance of mountable file system
 func NewFileSystem(hdfsAccessors []HdfsAccessor, srcDir string, allowedPrefixes []string, readOnly bool, delaySyncUntilClose bool, retryPolicy *RetryPolicy, clock Clock, opts ...FileSystemOption) (*FileSystem, error) {
+	allowedPrefixes, err := normalizeAllowedPrefixes(allowedPrefixes)
+	if err != nil {
+		return nil, err
+	}
 	filesystem := &FileSystem{
 		HdfsAccessors:       hdfsAccessors,
 		Mounted:             false,
@@ -164,6 +170,38 @@ func (filesystem *FileSystem) IsPathAllowed(candidate string) bool {
 		}
 	}
 	return false
+}
+
+// checkNamespaceChange returns EPERM, before any backend call, for a create, mkdir,
+// remove or rename endpoint whose absolute path IsPathAllowed rejects (HOPSFS-432).
+func (filesystem *FileSystem) checkNamespaceChange(operation, candidate string) error {
+	if filesystem.IsPathAllowed(candidate) {
+		return nil
+	}
+	logger.Warn("Rejected namespace change outside the allowed prefixes", logger.Fields{Operation: operation, Path: candidate})
+	return syscall.EPERM
+}
+
+// normalizeAllowedPrefixes trims whitespace and one leading and one trailing slash from
+// each prefix and drops entries left empty, keeping "*" as is. It rejects an entry made
+// only of slashes and one that path.Clean would change or that climbs with "..", so a
+// prefix is never silently rewritten into a different one.
+func normalizeAllowedPrefixes(prefixes []string) ([]string, error) {
+	normalized := make([]string, 0, len(prefixes))
+	for _, raw := range prefixes {
+		prefix := strings.TrimSpace(raw)
+		if prefix == "" {
+			continue
+		}
+		if prefix != "*" {
+			prefix = strings.TrimPrefix(strings.TrimSuffix(prefix, "/"), "/")
+			if prefix == "" || prefix == "." || prefix == ".." || strings.HasPrefix(prefix, "../") || path.Clean(prefix) != prefix {
+				return nil, fmt.Errorf("invalid allowed prefix %q", raw)
+			}
+		}
+		normalized = append(normalized, prefix)
+	}
+	return normalized, nil
 }
 
 // Register a file to be closed on Unmount()

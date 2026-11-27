@@ -182,6 +182,18 @@ func (fta *FaultTolerantHdfsAccessor) Chmod(path string, mode os.FileMode) error
 	}
 }
 
+func (fta *FaultTolerantHdfsAccessor) CheckAccess(path string, mode os.FileMode) error {
+	op := fta.RetryPolicy.StartOperation()
+	for {
+		err := fta.Impl.CheckAccess(path, mode)
+		if IsSuccessOrNonRetriableError(err) || !op.ShouldRetry("CheckAccess [%s] for [%o]: %s", path, mode, err) {
+			return err
+		} else if needsReconnect(err) {
+			fta.Impl.Close()
+		}
+	}
+}
+
 // Chown file or directory
 func (fta *FaultTolerantHdfsAccessor) Chown(path string, user, group string) error {
 	op := fta.RetryPolicy.StartOperation()

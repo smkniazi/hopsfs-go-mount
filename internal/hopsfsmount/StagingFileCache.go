@@ -550,8 +550,9 @@ func diskUsageExcess(path string, threshold float64) (excessBytes int64, err err
 
 // GetOrLoad tries to get a file from cache, or downloads it to cache if not found.
 // Returns an *os.File handle if successful (either from cache or freshly downloaded), or (nil, nil) if caching is not possible.
-// Returns (nil, error) if staging file creation fails.
-func (c *StagingFileCache) GetOrLoad(file *FileINode, operation string) (*os.File, error) {
+// Returns (nil, error) if staging file creation fails, or if checkRead is set and the
+// connection user may not read a file the cache holds (FileINode.checkReadAccess).
+func (c *StagingFileCache) GetOrLoad(file *FileINode, operation string, checkRead bool) (*os.File, error) {
 	absPath := file.AbsolutePath()
 
 	// Check if file exists in cache before making expensive Stat call
@@ -570,6 +571,11 @@ func (c *StagingFileCache) GetOrLoad(file *FileINode, operation string) (*os.Fil
 		file.Attrs.Size = upstreamInfo.Size
 		file.Attrs.Mtime = upstreamInfo.Mtime
 
+		if checkRead {
+			if err := file.checkReadAccess(absPath); err != nil {
+				return nil, err
+			}
+		}
 		if cachedFile, ok := c.Get(absPath, int64(upstreamInfo.Size), upstreamInfo.Mtime); ok {
 			return cachedFile, nil
 		}

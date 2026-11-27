@@ -43,6 +43,7 @@ type HdfsAccessor interface {
 	EnsureConnected() error                       // Ensures HDFS accessor is connected to the HDFS name node
 	Chown(path string, owner, group string) error // Changes the owner and group of the file
 	Chmod(path string, mode os.FileMode) error    // Changes the mode of the file
+	CheckAccess(path string, mode os.FileMode) error // Asks the namenode whether the connection user may access the path with mode (rwx bits); EPERM when not
 	Close() error                                 // Close current meta connection if needed
 	TryReserve() bool                             // Reserves the accessor for the caller's next call if it is free
 }
@@ -543,6 +544,24 @@ func (dfs *HdfsAccessorImpl) Chmod(path string, mode os.FileMode) error {
 	duration := time.Since(startTime)
 
 	logger.Debug("Backend Chmod", logger.Fields{Operation: Chmod, Path: path, Mode: mode, Duration: fmt.Sprintf("%.3fms", duration.Seconds()*1000)})
+	return unwrapAndTranslateError(err)
+}
+
+func (dfs *HdfsAccessorImpl) CheckAccess(path string, mode os.FileMode) error {
+	dfs.lockHadoopClient()
+	defer dfs.unlockHadoopClient()
+
+	if dfs.MetadataClient == nil {
+		if err := dfs.connectMetadataClient(); err != nil {
+			return unwrapAndTranslateError(err)
+		}
+	}
+
+	startTime := time.Now()
+	err := dfs.MetadataClient.CheckAccess(path, mode)
+	duration := time.Since(startTime)
+
+	logger.Debug("Backend CheckAccess", logger.Fields{Operation: CheckAccess, Path: path, Mode: mode, Duration: fmt.Sprintf("%.3fms", duration.Seconds()*1000), Error: err})
 	return unwrapAndTranslateError(err)
 }
 

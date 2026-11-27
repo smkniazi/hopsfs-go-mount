@@ -51,6 +51,9 @@ type FileINode struct {
 	dataMutex        sync.Mutex    // mutex for all I/O operations (read/write/truncate/flush) and isDirty flag
 	isDirty          bool          // tracks if file has unflushed writes (protected by dataMutex)
 	pendingDFSWriter HdfsWriter    // Writer from initial create, reused on first flush to avoid redundant Remove+Recreate
+
+	readAccessCheckedPath string    // path the last passed checkReadAccess was for (protected by fileMutex)
+	readAccessCheckedAt   time.Time // when it passed (protected by fileMutex)
 }
 
 // Verify that *File implements necesary FUSE interfaces
@@ -549,7 +552,13 @@ func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*F
 		fh.File.fileProxy = &LocalRWFileProxy{localFile: stagingFile, file: file}
 		logger.Info("Opened file, RW handle", fh.logInfo(logger.Fields{Operation: operation, Flags: fh.fileFlags}))
 	} else {
+		readable := !flags.IsWriteOnly()
 		if file.fileProxy != nil {
+			if readable {
+				if err := file.checkReadAccess(file.AbsolutePath()); err != nil {
+					return nil, err
+				}
+			}
 			fh.File.fileProxy = file.fileProxy
 			logger.Info("Opened file, Returning existing handle", fh.logInfo(logger.Fields{Operation: operation, Flags: fh.fileFlags}))
 		} else {
@@ -557,7 +566,7 @@ func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*F
 
 			// Try to get from cache or download to cache
 			if StagingCache != nil {
-				localFile, err := StagingCache.GetOrLoad(file, operation)
+				localFile, err := StagingCache.GetOrLoad(file, operation, readable)
 				if err != nil {
 					return nil, err
 				}
@@ -589,6 +598,24 @@ func (file *FileINode) NewFileHandle(existsInDFS bool, flags fuse.OpenFlags) (*F
 	file.activeHandles = append(file.activeHandles, fh)
 
 	return fh, nil
+}
+
+// checkReadAccess asks the namenode whether the connection user may read absPath, unless
+// that already passed for the same path within the attr TTL. NewFileHandle calls it for
+// read opens served without a namenode read: a shared proxy or a staging cache hit
+// (HOPSFS-432). A denial is EPERM. Caller holds fileMutex.
+func (file *FileINode) checkReadAccess(absPath string) error {
+	now := file.FileSystem.Clock.Now()
+	if file.readAccessCheckedPath == absPath && now.Before(file.readAccessCheckedAt.Add(CacheAttrsTimeDuration)) {
+		return nil
+	}
+	if err := file.FileSystem.getDFSConnector().CheckAccess(absPath, 0o4); err != nil {
+		logger.Warn("Read access check failed", logger.Fields{Operation: CheckAccess, Path: absPath, Error: err})
+		return err
+	}
+	file.readAccessCheckedPath = absPath
+	file.readAccessCheckedAt = now
+	return nil
 }
 
 // changes RO file handle to RW

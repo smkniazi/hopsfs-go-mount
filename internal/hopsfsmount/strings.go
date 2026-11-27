@@ -26,6 +26,7 @@ const (
 	From                          = "from"
 	To                            = "to"
 	Chmod                         = "chmod"
+	CheckAccess                   = "check_access"
 	Link                          = "link"
 	ReadLink                      = "read_link"
 	Symlink                       = "symlink"

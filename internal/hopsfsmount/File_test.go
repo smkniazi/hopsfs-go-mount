@@ -108,6 +108,106 @@ func TestOpenThroughTheStagingCacheTakesOneConnector(t *testing.T) {
 	assert.True(t, staged, "the open did not download the file into the staging cache")
 }
 
+// stageInCache puts content for path in StagingCache under mtime, as the
+// release of a read handle does.
+func stageInCache(t *testing.T, path, content string, mtime time.Time) {
+	t.Helper()
+	staged, err := os.CreateTemp(t.TempDir(), "staged_*")
+	assert.Nil(t, err)
+	_, err = staged.WriteString(content)
+	assert.Nil(t, err)
+	StagingCache.Put(path, staged, int64(len(content)), mtime)
+}
+
+// newCachedFileTest gives a file system whose one file, /cached, is in the
+// staging cache with the size and mtime the backend reports for it.
+func newCachedFileTest(t *testing.T) (*MockHdfsAccessor, *MockClock, *DirINode, *FileINode) {
+	originalCache := StagingCache
+	t.Cleanup(func() { StagingCache = originalCache })
+	StagingCache = newTestCache(t, 10)
+
+	mockCtrl := gomock.NewController(t)
+	mockClock := &MockClock{now: time.Now()}
+	connector := NewMockHdfsAccessor(mockCtrl)
+	connector.EXPECT().TryReserve().Return(true).AnyTimes()
+	fs, _ := NewFileSystem([]HdfsAccessor{connector}, "/", []string{"*"}, false, DelaySyncUntilClose, NewDefaultRetryPolicy(mockClock), mockClock)
+	root, _ := fs.Root()
+	mtime := time.Unix(1000, 0)
+	file := root.(*DirINode).addOrUpdateChildInodeAttrs("unit_test", "cached",
+		Attrs{Name: "cached", Mode: 0644, Size: 5, Mtime: mtime, Expires: mockClock.Now().Add(CacheAttrsTimeDuration)}).(*FileINode)
+	connector.EXPECT().Stat("/cached").Return(Attrs{Name: "cached", Mode: 0644, Size: 5, Mtime: mtime}, nil).AnyTimes()
+	stageInCache(t, "/cached", "hello", mtime)
+	return connector, mockClock, root.(*DirINode), file
+}
+
+func openAndRelease(t *testing.T, file *FileINode, flags fuse.OpenFlags) error {
+	t.Helper()
+	h, err := file.Open(nil, &fuse.OpenRequest{Flags: flags}, &fuse.OpenResponse{})
+	if err != nil {
+		return err
+	}
+	_, staged := h.(*FileHandle).File.fileProxy.(*LocalRWFileProxy)
+	assert.True(t, staged, "the open was not served from the staging cache")
+	return h.(*FileHandle).Release(nil, &fuse.ReleaseRequest{})
+}
+
+// A read open served from the staging cache asks the namenode whether the
+// connection user may read the file, at most once per attr TTL for a path, and
+// fails with the denial while the entry stays cached. A write-only open asks
+// nothing; the strict mock fails any CheckAccess it does not expect.
+func TestStagingCacheHitChecksReadAccessOncePerTTL(t *testing.T) {
+	connector, mockClock, _, file := newCachedFileTest(t)
+
+	connector.EXPECT().CheckAccess("/cached", os.FileMode(0o4)).Return(nil)
+	assert.Nil(t, openAndRelease(t, file, fuse.OpenReadOnly))
+	assert.Nil(t, openAndRelease(t, file, fuse.OpenReadOnly))
+	assert.Nil(t, openAndRelease(t, file, fuse.OpenWriteOnly))
+
+	mockClock.NotifyTimeElapsed(CacheAttrsTimeDuration + time.Second)
+	connector.EXPECT().CheckAccess("/cached", os.FileMode(0o4)).Return(syscall.EPERM)
+	_, err := file.Open(nil, &fuse.OpenRequest{Flags: fuse.OpenReadWrite}, &fuse.OpenResponse{})
+	assert.Equal(t, syscall.EPERM, err)
+	assert.True(t, StagingCache.Contains("/cached"))
+}
+
+// A passed check covers the path it was made for: after a rename the next read
+// open of the same inode is checked again at its new path.
+func TestReadAccessCheckIsRedoneAfterARename(t *testing.T) {
+	connector, _, root, file := newCachedFileTest(t)
+
+	connector.EXPECT().CheckAccess("/cached", os.FileMode(0o4)).Return(nil)
+	assert.Nil(t, openAndRelease(t, file, fuse.OpenReadOnly))
+
+	connector.EXPECT().Rename2("/cached", "/moved", gomock.Any()).Return(nil)
+	assert.Nil(t, root.Rename(nil, &fuse.RenameRequest{OldName: "cached", NewName: "moved"}, root))
+
+	connector.EXPECT().Stat("/moved").Return(Attrs{Name: "moved", Mode: 0644, Size: 5, Mtime: time.Unix(1000, 0)}, nil)
+	connector.EXPECT().CheckAccess("/moved", os.FileMode(0o4)).Return(nil)
+	assert.Nil(t, openAndRelease(t, file, fuse.OpenReadOnly))
+}
+
+// A read open that shares the proxy of a handle already open is checked the
+// same way, while the handle opened before the denial keeps reading.
+func TestSharedProxyOpenChecksReadAccess(t *testing.T) {
+	connector, mockClock, _, file := newCachedFileTest(t)
+
+	connector.EXPECT().CheckAccess("/cached", os.FileMode(0o4)).Return(nil)
+	first, err := file.Open(nil, &fuse.OpenRequest{Flags: fuse.OpenReadOnly}, &fuse.OpenResponse{})
+	assert.Nil(t, err)
+	_, err = file.Open(nil, &fuse.OpenRequest{Flags: fuse.OpenReadOnly}, &fuse.OpenResponse{})
+	assert.Nil(t, err)
+
+	mockClock.NotifyTimeElapsed(CacheAttrsTimeDuration + time.Second)
+	connector.EXPECT().CheckAccess("/cached", os.FileMode(0o4)).Return(syscall.EPERM)
+	_, err = file.Open(nil, &fuse.OpenRequest{Flags: fuse.OpenReadOnly}, &fuse.OpenResponse{})
+	assert.Equal(t, syscall.EPERM, err)
+
+	// The FUSE server hands Read a buffer of the request size.
+	resp := &fuse.ReadResponse{Data: make([]byte, 5)}
+	assert.Nil(t, first.(*FileHandle).Read(nil, &fuse.ReadRequest{Offset: 0, Size: 5}, resp))
+	assert.Equal(t, "hello", string(resp.Data))
+}
+
 // A flush of a new file uploads through the writer its create kept, and
 // takes a connector only for the stat after the upload: one taken before the
 // upload would keep every other request off it, or add a connector, for as

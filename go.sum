@@ -74,8 +74,6 @@ github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
 github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
 github.com/logicalclocks/fuse v1.0.1 h1:TBYAHJxoZ1CDl4+NtaZKmLf764DcreX8pGUXnmspP74=
 github.com/logicalclocks/fuse v1.0.1/go.mod h1:gG3RZAMXCa/OTes6rr9EwusmR1OH1tDDy+cg9c5YliY=
-github.com/logicalclocks/hopsfs-go-client/v2 v2.6.4 h1:Xhyt/Oz9OzAphDjq3wsBqvlvQp9suge41NC8rI2IX0I=
-github.com/logicalclocks/hopsfs-go-client/v2 v2.6.4/go.mod h1:gDgguXVzMeHxKjFt5iv414mETvTjmF4D6RwjlG91mwE=
 github.com/onsi/gomega v1.34.1 h1:EUMJIKUjM8sKjYbtxQI9A4z2o+rruxnzNvpknOXie6k=
 github.com/onsi/gomega v1.34.1/go.mod h1:kU1QgUvBDLXBJq618Xvm2LUX6rSAfRaFRTcdOeDLwwY=
 github.com/pjbgf/sha1cd v0.6.0 h1:3WJ8Wz8gvDz29quX1OcEmkAlUg9diU4GxJHqs0/XiwU=
@@ -93,6 +91,8 @@ github.com/sirupsen/logrus v1.9.4 h1:TsZE7l11zFCLZnZ+teH4Umoq5BhEIfIzfRDZ1Uzql2w
 github.com/sirupsen/logrus v1.9.4/go.mod h1:ftWc9WdOfJ0a92nsE2jF5u5ZwH8Bv2zdeOC42RjbV2g=
 github.com/skeema/knownhosts v1.3.1 h1:X2osQ+RAjK76shCbvhHHHVl3ZlgDm8apHEHFqRjnBY8=
 github.com/skeema/knownhosts v1.3.1/go.mod h1:r7KTdC8l4uxWRyK2TpQZ/1o5HaSzh06ePQNxPwTcfiY=
+github.com/smkniazi/hopsfs-go-client/v2 v2.0.0-20261127153403-0dc3315b7eb0 h1:ttw+iRJKXnjvPhz9AkCsnS+lStxAqxfbirR+iwzkzfQ=
+github.com/smkniazi/hopsfs-go-client/v2 v2.0.0-20261127153403-0dc3315b7eb0/go.mod h1:gDgguXVzMeHxKjFt5iv414mETvTjmF4D6RwjlG91mwE=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.4.0/go.mod h1:YvHI0jy2hoMjB+UWwv71VJQ9isScKT/TqJzVSSt89Yw=
 github.com/stretchr/objx v0.5.0/go.mod h1:Yh+to48EsGEfYuaHDzXPcE3xhTkx73EhmCGUpEOglKo=
